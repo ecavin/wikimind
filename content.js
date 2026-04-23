@@ -2,6 +2,14 @@
 // Extracts the current article's metadata and sends one ARTICLE_VISIT message.
 
 (async function () {
+  const KNOWN_NS = new Set([
+    'Special', 'Talk', 'User', 'User_talk', 'Wikipedia', 'Wikipedia_talk',
+    'File', 'File_talk', 'MediaWiki', 'MediaWiki_talk', 'Template', 'Template_talk',
+    'Help', 'Help_talk', 'Category', 'Category_talk', 'Portal', 'Portal_talk',
+    'Draft', 'Draft_talk', 'Module', 'Module_talk', 'Book', 'Book_talk',
+    'TimedText', 'TimedText_talk'
+  ]);
+
   async function sendWithRetry(message, retries = 3, delayMs = 150) {
     for (let i = 0; i < retries; i++) {
       const ok = await new Promise((resolve) => {
@@ -21,19 +29,7 @@
     const match = path.match(/^\/wiki\/([^#?]+)/);
     if (!match) return;
     const slug = decodeURIComponent(match[1]);
-    if (slug.includes(':')) {
-      // Article titles can legitimately contain colons (e.g. "Saint: something"),
-      // but MediaWiki namespaces are a known small set. Check against them.
-      const ns = slug.split(':')[0];
-      const KNOWN_NS = new Set([
-        'Special', 'Talk', 'User', 'User_talk', 'Wikipedia', 'Wikipedia_talk',
-        'File', 'File_talk', 'MediaWiki', 'MediaWiki_talk', 'Template', 'Template_talk',
-        'Help', 'Help_talk', 'Category', 'Category_talk', 'Portal', 'Portal_talk',
-        'Draft', 'Draft_talk', 'Module', 'Module_talk', 'Book', 'Book_talk',
-        'TimedText', 'TimedText_talk'
-      ]);
-      if (KNOWN_NS.has(ns)) return;
-    }
+    if (slug.includes(':') && KNOWN_NS.has(slug.split(':')[0])) return;
 
     const heading = document.querySelector('#firstHeading');
     if (!heading) return;
@@ -55,9 +51,26 @@
     const catNodes = document.querySelectorAll('#mw-normal-catlinks ul li a');
     const categories = Array.from(catNodes).map((a) => (a.textContent || '').trim()).filter(Boolean);
 
+    // Detect which article the user navigated from.
+    let navigatedFrom = null;
+    try {
+      if (document.referrer) {
+        const refUrl = new URL(document.referrer);
+        if (refUrl.hostname.endsWith('.wikipedia.org')) {
+          const rm = refUrl.pathname.match(/^\/wiki\/([^#?]+)/);
+          if (rm) {
+            const refSlug = decodeURIComponent(rm[1]);
+            if (!KNOWN_NS.has(refSlug.split(':')[0])) {
+              navigatedFrom = refSlug.replace(/_/g, ' ');
+            }
+          }
+        }
+      }
+    } catch (_) {}
+
     await sendWithRetry({
       type: 'ARTICLE_VISIT',
-      payload: { title, url: location.href, summary, categories }
+      payload: { title, url: location.href, summary, categories, navigatedFrom }
     });
   } catch (err) {
     console.warn('[wikimind] content script error', err);

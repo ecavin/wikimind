@@ -1,7 +1,7 @@
 // dashboard/dashboard.js — D3 force graph, list view, cluster + recommendation UI.
 
 (async function () {
-  const { getArticles, getSettings } = window.WikimindStorage;
+  const { getArticles, getSettings, getNavEdges } = window.WikimindStorage;
   const { fetchSummary } = window.WikimindWikipedia;
   const { getRecommendations, getGapAnalysis, clusterArticles } = window.WikimindLLM;
 
@@ -30,7 +30,8 @@
   let currentTransform = d3.zoomIdentity;
   let currentView = 'graph';
   let treeRootTitle = null;
-  let treeDepthVal = 2;
+  let treeDepthVal = 99;
+  let navChildrenMap = {}; // title → [child titles] from recorded navigation
 
   // --- SVG defs (gradients, filters) ---
   const defs = svg.append('defs');
@@ -86,6 +87,19 @@
 
   async function loadData() {
     articles = await getArticles();
+    const navEdges = await getNavEdges();
+
+    // Build children map from stored navigation edges.
+    navChildrenMap = {};
+    for (const key of Object.keys(navEdges)) {
+      const sep = key.indexOf('\x01');
+      if (sep === -1) continue;
+      const from = key.slice(0, sep);
+      const to = key.slice(sep + 1);
+      if (!navChildrenMap[from]) navChildrenMap[from] = [];
+      if (!navChildrenMap[from].includes(to)) navChildrenMap[from].push(to);
+    }
+
     const list = Object.values(articles);
     buildGraph(list);
     renderList(list);
@@ -488,11 +502,12 @@
 
   // --- Tree view ---
 
+  // Build a tree from actual navigation edges. The same article can appear in
+  // multiple branches (if navigated to from different parents). Cycles within
+  // a single path are broken by the per-path ancestor set.
   function buildTreeData(rootTitle, maxDepth) {
-    const visited = new Set();
-    function recurse(title, depth) {
-      if (visited.has(title)) return null;
-      visited.add(title);
+    function recurse(title, ancestors, depth) {
+      if (depth > maxDepth) return null;
       const art = articles[title];
       if (!art) return null;
       const node = {
@@ -506,42 +521,59 @@
         lastVisited: art.lastVisited,
         links: art.links || []
       };
-      if (depth < maxDepth) {
-        const childTitles = (art.links || [])
-          .filter((t) => articles[t] && !visited.has(t))
-          .slice(0, 7);
-        const children = childTitles.map((t) => recurse(t, depth + 1)).filter(Boolean);
-        if (children.length) node.children = children;
-      }
+      const newAncestors = new Set(ancestors);
+      newAncestors.add(title);
+      const childTitles = (navChildrenMap[title] || []).filter((t) => !newAncestors.has(t));
+      const children = childTitles.map((t) => recurse(t, newAncestors, depth + 1)).filter(Boolean);
+      if (children.length) node.children = children;
       return node;
     }
-    return recurse(rootTitle, 0);
+    return recurse(rootTitle, new Set(), 0);
   }
 
   function populateRootSelect() {
     const sel = document.getElementById('tree-root-select');
     const prev = sel.value;
     sel.innerHTML = '';
-    const sorted = Object.values(articles).sort((a, b) => b.visitCount - a.visitCount);
-    for (const a of sorted) {
+
+    // Articles that are never a navigation destination are natural session roots.
+    const allTargets = new Set(Object.values(navChildrenMap).flat());
+    const list = Object.values(articles);
+    const roots = list.filter((a) => !allTargets.has(a.title))
+      .sort((a, b) => (a.firstVisited || 0) - (b.firstVisited || 0));
+    const rest = list.filter((a) => allTargets.has(a.title))
+      .sort((a, b) => b.visitCount - a.visitCount);
+
+    for (const a of [...roots, ...rest]) {
       const opt = document.createElement('option');
       opt.value = a.title;
-      opt.textContent = a.title.length > 48 ? a.title.slice(0, 48) + '…' : a.title;
+      const label = a.title.length > 48 ? a.title.slice(0, 48) + '…' : a.title;
+      opt.textContent = roots.includes(a) ? '◎ ' + label : label;
       sel.appendChild(opt);
     }
+
     if (prev && articles[prev]) sel.value = prev;
-    else if (sorted.length) sel.value = sorted[0].title;
+    else if (roots.length) sel.value = roots[0].title;
+    else if (rest.length) sel.value = rest[0].title;
     treeRootTitle = sel.value;
   }
 
   function renderTreeView() {
-    const list = Object.values(articles);
-    if (list.length === 0) {
-      document.getElementById('tree-empty').classList.remove('hidden');
-      document.getElementById('tree-canvas').style.display = 'none';
+    const treeEmptyEl = document.getElementById('tree-empty');
+    const treeCanvas = document.getElementById('tree-canvas');
+    const noNav = Object.keys(navChildrenMap).length === 0;
+
+    if (Object.keys(articles).length === 0 || noNav) {
+      treeEmptyEl.querySelector('h2').textContent = noNav ? 'No navigation paths yet' : 'No articles yet';
+      treeEmptyEl.querySelector('p').innerHTML = noNav
+        ? 'Click through Wikipedia articles to record your path — each link you follow creates a branch in this tree.'
+        : 'Start reading Wikipedia — articles and their connections will grow here.';
+      treeEmptyEl.classList.remove('hidden');
+      treeCanvas.style.display = 'none';
       return;
     }
-    document.getElementById('tree-canvas').style.display = '';
+    treeEmptyEl.classList.add('hidden');
+    treeCanvas.style.display = '';
     populateRootSelect();
     drawTree();
   }
@@ -561,7 +593,14 @@
     if (!treeData) return;
 
     const hasChildren = !!(treeData.children && treeData.children.length);
-    document.getElementById('tree-empty').classList.toggle('hidden', hasChildren || Object.keys(articles).length > 0);
+    const emptyEl = document.getElementById('tree-empty');
+    if (!hasChildren) {
+      emptyEl.querySelector('h2').textContent = 'No paths from this article';
+      emptyEl.querySelector('p').innerHTML = 'No navigation was recorded starting from here. Pick a different root, or click through links on Wikipedia to build branches.';
+      emptyEl.classList.remove('hidden');
+    } else {
+      emptyEl.classList.add('hidden');
+    }
 
     const root = d3.hierarchy(treeData);
 

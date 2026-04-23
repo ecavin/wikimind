@@ -4,12 +4,13 @@
 
 importScripts('lib/storage.js', 'lib/wikipedia.js');
 
-const { upsertVisit, getSettings, getArticles, updateLinks, addLink } = self.WikimindStorage;
+const { upsertVisit, getSettings, getArticles, updateLinks, addLink, addNavEdge } = self.WikimindStorage;
 const { fetchArticleLinks } = self.WikimindWikipedia;
 
 async function handleArticleVisit(payload) {
   if (!payload || !payload.title) return { ok: false, error: 'missing title' };
   const { article, isNew } = await upsertVisit(payload);
+  if (payload.navigatedFrom) await addNavEdge(payload.navigatedFrom, payload.title);
   const settings = await getSettings();
 
   if (settings.showNotifications) {
