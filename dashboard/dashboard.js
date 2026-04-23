@@ -28,6 +28,9 @@
   let dateRange = { from: null, to: null };
   let selectedId = null;
   let currentTransform = d3.zoomIdentity;
+  let currentView = 'graph';
+  let treeRootTitle = null;
+  let treeDepthVal = 2;
 
   // --- SVG defs (gradients, filters) ---
   const defs = svg.append('defs');
@@ -100,6 +103,7 @@
 
     document.getElementById('list-count').textContent = `${list.length} article${list.length === 1 ? '' : 's'}`;
     updateHud();
+    if (currentView === 'tree') renderTreeView();
   }
 
   function updateHud() {
@@ -420,6 +424,7 @@
       document.getElementById('recommend-modal').classList.add('hidden');
       infoPanel.classList.add('hidden');
       nodeLayer.selectAll('g.node').classed('selected', false);
+      d3.select('#tree-canvas').selectAll('.tree-node').classed('tree-node--selected', false);
       selectedId = null;
     }
   });
@@ -458,23 +463,199 @@
     });
   });
 
-  document.getElementById('btn-toggle-view').addEventListener('click', () => {
+  const VIEW_CYCLE = { graph: 'list', list: 'tree', tree: 'graph' };
+  const VIEW_NEXT_LABEL = { graph: 'List', list: 'Tree', tree: 'Graph' };
+
+  function switchView(mode) {
+    currentView = mode;
+    document.getElementById('graph-container').classList.toggle('hidden', mode !== 'graph');
+    listView.classList.toggle('hidden', mode !== 'list');
+    document.getElementById('tree-view').classList.toggle('hidden', mode !== 'tree');
+    infoPanel.classList.add('hidden');
+    nodeLayer.selectAll('g.node').classed('selected', false);
+    selectedId = null;
+
     const btn = document.getElementById('btn-toggle-view');
-    const label = btn.querySelector('span');
-    const showingList = !listView.classList.contains('hidden');
-    if (showingList) {
-      listView.classList.add('hidden');
-      document.getElementById('graph-container').classList.remove('hidden');
-      infoPanel.classList.add('hidden');
-      label.textContent = 'List';
-      btn.classList.remove('active');
-    } else {
-      listView.classList.remove('hidden');
-      document.getElementById('graph-container').classList.add('hidden');
-      infoPanel.classList.add('hidden');
-      label.textContent = 'Graph';
-      btn.classList.add('active');
+    btn.querySelector('span').textContent = VIEW_NEXT_LABEL[mode];
+    btn.classList.toggle('active', mode !== 'graph');
+
+    if (mode === 'tree') renderTreeView();
+  }
+
+  document.getElementById('btn-toggle-view').addEventListener('click', () => {
+    switchView(VIEW_CYCLE[currentView]);
+  });
+
+  // --- Tree view ---
+
+  function buildTreeData(rootTitle, maxDepth) {
+    const visited = new Set();
+    function recurse(title, depth) {
+      if (visited.has(title)) return null;
+      visited.add(title);
+      const art = articles[title];
+      if (!art) return null;
+      const node = {
+        id: title,
+        name: title,
+        visitCount: art.visitCount || 1,
+        categories: art.categories || [],
+        url: art.url,
+        summary: art.summary || '',
+        firstVisited: art.firstVisited,
+        lastVisited: art.lastVisited,
+        links: art.links || []
+      };
+      if (depth < maxDepth) {
+        const childTitles = (art.links || [])
+          .filter((t) => articles[t] && !visited.has(t))
+          .slice(0, 7);
+        const children = childTitles.map((t) => recurse(t, depth + 1)).filter(Boolean);
+        if (children.length) node.children = children;
+      }
+      return node;
     }
+    return recurse(rootTitle, 0);
+  }
+
+  function populateRootSelect() {
+    const sel = document.getElementById('tree-root-select');
+    const prev = sel.value;
+    sel.innerHTML = '';
+    const sorted = Object.values(articles).sort((a, b) => b.visitCount - a.visitCount);
+    for (const a of sorted) {
+      const opt = document.createElement('option');
+      opt.value = a.title;
+      opt.textContent = a.title.length > 48 ? a.title.slice(0, 48) + '…' : a.title;
+      sel.appendChild(opt);
+    }
+    if (prev && articles[prev]) sel.value = prev;
+    else if (sorted.length) sel.value = sorted[0].title;
+    treeRootTitle = sel.value;
+  }
+
+  function renderTreeView() {
+    const list = Object.values(articles);
+    if (list.length === 0) {
+      document.getElementById('tree-empty').classList.remove('hidden');
+      document.getElementById('tree-canvas').style.display = 'none';
+      return;
+    }
+    document.getElementById('tree-canvas').style.display = '';
+    populateRootSelect();
+    drawTree();
+  }
+
+  function drawTree() {
+    if (!treeRootTitle || !articles[treeRootTitle]) return;
+
+    const canvasEl = document.getElementById('tree-canvas');
+    const wrapEl = canvasEl.parentElement;
+    const W = wrapEl.clientWidth || 900;
+    const H = wrapEl.clientHeight || 600;
+
+    const treeSvg = d3.select('#tree-canvas').attr('width', W).attr('height', H);
+    treeSvg.selectAll('*').remove();
+
+    const treeData = buildTreeData(treeRootTitle, treeDepthVal);
+    if (!treeData) return;
+
+    const hasChildren = !!(treeData.children && treeData.children.length);
+    document.getElementById('tree-empty').classList.toggle('hidden', hasChildren || Object.keys(articles).length > 0);
+
+    const root = d3.hierarchy(treeData);
+
+    const nodeSpacingY = 44;
+    const levelSpacingX = 210;
+    const treeLayout = d3.tree().nodeSize([nodeSpacingY, levelSpacingX]);
+    treeLayout(root);
+
+    // Bounding box
+    let x0 = Infinity, x1 = -Infinity;
+    root.each((d) => { if (d.x < x0) x0 = d.x; if (d.x > x1) x1 = d.x; });
+
+    // Zoom behaviour
+    const treeZoom = d3.zoom()
+      .scaleExtent([0.15, 4])
+      .on('zoom', (event) => treeG.attr('transform', event.transform));
+    treeSvg.call(treeZoom).on('dblclick.zoom', null);
+
+    const treeG = treeSvg.append('g');
+
+    const initTx = 72;
+    const initTy = H / 2 - (x0 + x1) / 2;
+    treeSvg.call(treeZoom.transform, d3.zoomIdentity.translate(initTx, initTy));
+    treeG.attr('transform', `translate(${initTx},${initTy})`);
+
+    // Links
+    treeG.selectAll('.tree-link')
+      .data(root.links())
+      .enter()
+      .append('path')
+      .attr('class', 'tree-link')
+      .attr('d', d3.linkHorizontal().x((d) => d.y).y((d) => d.x));
+
+    // Nodes
+    const nodeG = treeG.selectAll('.tree-node')
+      .data(root.descendants())
+      .enter()
+      .append('g')
+      .attr('class', (d) => 'tree-node' + (d.depth === 0 ? ' tree-node--root' : ''))
+      .attr('transform', (d) => `translate(${d.y},${d.x})`)
+      .style('color', (d) => colorFor(d.data))
+      .on('click', (event, d) => {
+        event.stopPropagation();
+        treeSvg.selectAll('.tree-node').classed('tree-node--selected', false);
+        d3.select(event.currentTarget).classed('tree-node--selected', true);
+        const gn = nodes.find((n) => n.id === d.data.id);
+        if (gn) openInfo(gn);
+      })
+      .on('dblclick', (event, d) => {
+        event.stopPropagation();
+        treeRootTitle = d.data.id;
+        document.getElementById('tree-root-select').value = treeRootTitle;
+        drawTree();
+      })
+      .on('mouseenter', (event) => {
+        d3.select(event.currentTarget).select('.tree-node-halo').style('stroke-opacity', '0.55');
+      })
+      .on('mouseleave', (event) => {
+        const el = event.currentTarget;
+        if (!d3.select(el).classed('tree-node--selected')) {
+          d3.select(el).select('.tree-node-halo').style('stroke-opacity', '0');
+        }
+      });
+
+    nodeG.append('circle')
+      .attr('class', 'tree-node-halo')
+      .attr('r', (d) => radiusFor(d.data) + 5)
+      .style('stroke-opacity', '0');
+
+    nodeG.append('circle')
+      .attr('class', 'tree-node-core')
+      .attr('r', (d) => radiusFor(d.data))
+      .attr('fill', (d) => colorFor(d.data))
+      .attr('stroke', 'rgba(7,6,14,0.85)')
+      .attr('stroke-width', 1.5);
+
+    nodeG.append('text')
+      .attr('class', 'tree-node-label')
+      .attr('x', (d) => radiusFor(d.data) + 7)
+      .attr('dy', '0.35em')
+      .text((d) => {
+        const t = d.data.name;
+        return t.length > 30 ? t.slice(0, 30) + '…' : t;
+      });
+  }
+
+  document.getElementById('tree-root-select').addEventListener('change', (e) => {
+    treeRootTitle = e.target.value;
+    drawTree();
+  });
+
+  document.getElementById('tree-depth-select').addEventListener('change', (e) => {
+    treeDepthVal = parseInt(e.target.value, 10);
+    drawTree();
   });
 
   document.getElementById('info-close').addEventListener('click', () => {
