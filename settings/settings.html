@@ -1,0 +1,57 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>WikiMind — Settings</title>
+  <link rel="stylesheet" href="settings.css">
+</head>
+<body>
+  <main>
+    <h1>WikiMind Settings</h1>
+
+    <section>
+      <h2>Gemini API Key</h2>
+      <p class="hint">
+        Used for Recommendations, Gap Analysis, and Semantic Clustering. Stored locally in
+        <code>chrome.storage.local</code>. Sent only to <code>generativelanguage.googleapis.com</code>.
+      </p>
+      <input id="api-key" type="password" placeholder="AIza..." autocomplete="off">
+      <div id="key-status" class="status"></div>
+    </section>
+
+    <section>
+      <h2>Preferences</h2>
+      <label class="toggle">
+        <input id="auto-fetch" type="checkbox">
+        <span>Auto-fetch article links on visit</span>
+      </label>
+      <label class="toggle">
+        <input id="notifications" type="checkbox">
+        <span>Show visit notifications</span>
+      </label>
+    </section>
+
+    <section>
+      <h2>Data</h2>
+      <div class="actions">
+        <button id="export-btn">Export Data</button>
+        <button id="clear-btn" class="danger">Clear All Data</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>Stats</h2>
+      <dl id="stats">
+        <dt>Total articles read</dt><dd id="s-articles">–</dd>
+        <dt>Total connections</dt><dd id="s-connections">–</dd>
+        <dt>Most visited article</dt><dd id="s-mostvisited">–</dd>
+        <dt>Most common category</dt><dd id="s-category">–</dd>
+        <dt>Reading streak</dt><dd id="s-streak">–</dd>
+      </dl>
+    </section>
+  </main>
+
+  <script src="../lib/storage.js"></script>
+  <script src="settings.js"></script>
+</body>
+</html>

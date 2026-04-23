@@ -1,0 +1,29 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>WikiMind</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <h1>WikiMind</h1>
+  </header>
+
+  <section class="stats">
+    <div class="stat"><span id="stat-articles">–</span><label>articles</label></div>
+    <div class="stat"><span id="stat-connections">–</span><label>connections</label></div>
+  </section>
+
+  <section class="recent">
+    <h2>Recent</h2>
+    <ul id="recent-list"><li class="empty">No articles tracked yet.</li></ul>
+  </section>
+
+  <button id="open-dashboard" class="primary">Open Dashboard</button>
+  <a href="#" id="open-settings" class="settings-link">Settings</a>
+
+  <script src="../lib/storage.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>
