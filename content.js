@@ -1,7 +1,20 @@
 // content.js — runs on en.wikipedia.org/wiki/* at document_idle.
 // Extracts the current article's metadata and sends one ARTICLE_VISIT message.
 
-(function () {
+(async function () {
+  async function sendWithRetry(message, retries = 3, delayMs = 150) {
+    for (let i = 0; i < retries; i++) {
+      const ok = await new Promise((resolve) => {
+        chrome.runtime.sendMessage(message, () => {
+          resolve(!chrome.runtime.lastError);
+        });
+      });
+      if (ok) return;
+      if (i < retries - 1) await new Promise((r) => setTimeout(r, delayMs));
+    }
+    console.warn('[wikimind] failed to deliver ARTICLE_VISIT after retries');
+  }
+
   try {
     // Skip non-article namespaces (Special:, Talk:, File:, Help:, etc.).
     const path = location.pathname;
@@ -42,18 +55,9 @@
     const catNodes = document.querySelectorAll('#mw-normal-catlinks ul li a');
     const categories = Array.from(catNodes).map((a) => (a.textContent || '').trim()).filter(Boolean);
 
-    chrome.runtime.sendMessage({
+    await sendWithRetry({
       type: 'ARTICLE_VISIT',
-      payload: {
-        title,
-        url: location.href,
-        summary,
-        categories
-      }
-    }, () => {
-      if (chrome.runtime.lastError) {
-        // Worker not ready yet, or extension reloaded. Swallow.
-      }
+      payload: { title, url: location.href, summary, categories }
     });
   } catch (err) {
     console.warn('[wikimind] content script error', err);
