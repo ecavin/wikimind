@@ -251,3 +251,59 @@ body {
 .primary-btn:active { transform: translateY(0); }
 .primary-btn svg { transition: transform 0.2s; }
 .primary-btn:hover svg { transform: translateX(3px); }
+
+/* --- Article status section --- */
+#current-article-section {
+  margin-bottom: 14px;
+  padding: 12px 11px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.current-article-name {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--fg);
+  margin-bottom: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.status-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.status-btn {
+  flex: 1;
+  padding: 6px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.status-btn:hover { background: var(--surface-hi); color: var(--fg); }
+
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.status-dot.status-understood { background: #4ade80; box-shadow: 0 0 5px #4ade80; }
+.status-dot.status-learning    { background: #fbbf24; box-shadow: 0 0 5px #fbbf24; }
+.status-dot.status-confused    { background: #f87171; box-shadow: 0 0 5px #f87171; }
+
+.status-btn--active[data-status="understood"] { border-color: #4ade80; background: rgba(74,222,128,0.1); color: #4ade80; }
+.status-btn--active[data-status="learning"]   { border-color: #fbbf24; background: rgba(251,191,36,0.1);  color: #fbbf24; }
+.status-btn--active[data-status="confused"]   { border-color: #f87171; background: rgba(248,113,113,0.1); color: #f87171; }

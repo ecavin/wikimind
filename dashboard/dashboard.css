@@ -765,12 +765,12 @@ main#stage {
   flex-shrink: 0;
 }
 
-#modal-body { padding: 20px 24px 28px; }
+#modal-body, #tree-modal-body { padding: 20px 24px 28px; }
 
-#modal-body section { margin-top: 20px; }
-#modal-body section:first-child { margin-top: 0; }
+#modal-body section, #tree-modal-body section { margin-top: 20px; }
+#modal-body section:first-child, #tree-modal-body section:first-child { margin-top: 0; }
 
-#modal-body h3 {
+#modal-body h3, #tree-modal-body h3 {
   font-size: 10.5px;
   text-transform: uppercase;
   letter-spacing: 0.1em;
@@ -790,6 +790,33 @@ main#stage {
   box-shadow: 0 0 8px var(--accent-1);
 }
 .section-dot.gap { background: var(--accent-3); box-shadow: 0 0 8px var(--accent-3); }
+.section-dot.tutor { background: #f472b6; box-shadow: 0 0 8px #f472b6; }
+
+.tutor-item {
+  padding: 12px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  margin-bottom: 8px;
+  transition: all 0.15s ease;
+}
+.tutor-item:hover { border-color: var(--border-hi); background: var(--surface-hi); }
+.tutor-item .concept { font-weight: 600; font-size: 13.5px; letter-spacing: -0.005em; }
+.tutor-item .concept a { color: var(--accent-2); text-decoration: none; }
+.tutor-item .concept a:hover { text-decoration: underline; }
+.tutor-item .tutor-meta { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+.tutor-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.tutor-badge.prerequisite { background: rgba(248,113,113,0.12); border: 1px solid rgba(248,113,113,0.3); color: #f87171; }
+.tutor-badge.supporting   { background: rgba(251,191,36,0.12);  border: 1px solid rgba(251,191,36,0.3);  color: #fbbf24; }
+.tutor-item .relates-to { font-size: 11px; color: var(--muted); }
+.tutor-item .reason { font-size: 12.5px; color: #c5cdd8; margin-top: 5px; line-height: 1.5; }
 
 .rec-item, .gap-item {
   padding: 12px 14px;
@@ -810,8 +837,8 @@ main#stage {
   font-size: 13.5px;
   letter-spacing: -0.005em;
 }
-.rec-item .title a { color: var(--accent-1); text-decoration: none; }
-.rec-item .title a:hover { color: var(--accent-2); text-decoration: underline; }
+.rec-item .title a, .gap-item .topic a { color: var(--accent-1); text-decoration: none; }
+.rec-item .title a:hover, .gap-item .topic a:hover { color: var(--accent-2); text-decoration: underline; }
 
 .rec-item .reason, .gap-item .reason {
   font-size: 12.5px;

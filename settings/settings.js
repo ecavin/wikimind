@@ -20,7 +20,7 @@
   }
 
   apiKeyInput.addEventListener('blur', async () => {
-    const v = apiKeyInput.value.trim();
+    const v = apiKeyInput.value.replace(/[^\u0000-\u00FF]/g, '').trim();
     await setSettings({ apiKey: v });
     flash(v ? 'API key saved' : 'API key cleared', 'success');
   });

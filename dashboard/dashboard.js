@@ -1,9 +1,12 @@
 // dashboard/dashboard.js — D3 force graph, list view, cluster + recommendation UI.
 
 (async function () {
-  const { getArticles, getSettings, getNavEdges } = window.WikimindStorage;
+  const { getArticles, getSettings, getNavEdges, updateStatus, addNavEdge } = window.WikimindStorage;
   const { fetchSummary } = window.WikimindWikipedia;
-  const { getRecommendations, getGapAnalysis, clusterArticles } = window.WikimindLLM;
+  const { getRecommendations, getGapAnalysis, clusterArticles,
+          getTreeRecommendations, getTreeGapAnalysis, getTutorRecommendations } = window.WikimindLLM;
+
+  const STATUS_COLORS = { understood: '#4ade80', learning: '#fbbf24', confused: '#f87171' };
 
   const svg = d3.select('#graph');
   const graphContainer = document.getElementById('graph-container');
@@ -135,7 +138,8 @@
       visitCount: a.visitCount || 1,
       firstVisited: a.firstVisited,
       lastVisited: a.lastVisited,
-      links: a.links || []
+      links: a.links || [],
+      status: a.status || null
     }));
 
     const present = new Set(nodes.map((n) => n.id));
@@ -165,6 +169,7 @@
   function radiusFor(n) { return 4 + Math.sqrt(n.visitCount) * 3; }
 
   function colorFor(n) {
+    if (n.status && STATUS_COLORS[n.status]) return STATUS_COLORS[n.status];
     if (colorMode === 'cluster' && clusterMap && clusterColors) {
       const c = clusterMap[n.id] || 'Unclustered';
       return clusterColors(c);
@@ -436,6 +441,7 @@
     }
     if (e.key === 'Escape') {
       document.getElementById('recommend-modal').classList.add('hidden');
+      document.getElementById('tree-rec-modal').classList.add('hidden');
       infoPanel.classList.add('hidden');
       nodeLayer.selectAll('g.node').classed('selected', false);
       d3.select('#tree-canvas').selectAll('.tree-node').classed('tree-node--selected', false);
@@ -519,7 +525,8 @@
         summary: art.summary || '',
         firstVisited: art.firstVisited,
         lastVisited: art.lastVisited,
-        links: art.links || []
+        links: art.links || [],
+        status: art.status || null
       };
       const newAncestors = new Set(ancestors);
       newAncestors.add(title);
@@ -529,6 +536,13 @@
       return node;
     }
     return recurse(rootTitle, new Set(), 0);
+  }
+
+  function getTreeArticles() {
+    if (!treeRootTitle || !articles[treeRootTitle]) return [];
+    const treeData = buildTreeData(treeRootTitle, treeDepthVal);
+    if (!treeData) return [];
+    return d3.hierarchy(treeData).descendants().map((d) => articles[d.data.id]).filter(Boolean);
   }
 
   function populateRootSelect() {
@@ -808,12 +822,7 @@
       for (const r of recs) recList.appendChild(renderRec(r));
       gapList.innerHTML = '';
       if (!gaps.length) gapList.innerHTML = '<div style="color: var(--muted); font-size: 13px;">No gaps identified.</div>';
-      for (const g of gaps) {
-        const div = document.createElement('div');
-        div.className = 'gap-item';
-        div.innerHTML = `<div class="topic">${escapeHtml(g.topic)}</div><div class="reason">${escapeHtml(g.reason)}</div>`;
-        gapList.appendChild(div);
-      }
+      for (const g of gaps) gapList.appendChild(renderGap(g));
     } catch (err) {
       recList.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
     } finally {
@@ -844,11 +853,103 @@
     return div;
   }
 
+  function renderGap(g) {
+    const div = document.createElement('div');
+    div.className = 'gap-item';
+    const wikiUrl = `https://en.wikipedia.org/wiki/${encodeURIComponent(g.topic.replace(/ /g, '_'))}`;
+    div.innerHTML = `<div class="topic"><a href="${wikiUrl}" target="_blank" rel="noopener">${escapeHtml(g.topic)}</a></div><div class="reason">${escapeHtml(g.reason)}</div>`;
+    return div;
+  }
+
   document.getElementById('modal-close').addEventListener('click', () => {
     document.getElementById('recommend-modal').classList.add('hidden');
   });
   document.querySelector('#recommend-modal .modal-backdrop').addEventListener('click', () => {
     document.getElementById('recommend-modal').classList.add('hidden');
+  });
+
+  // --- Tree Insights modal ---
+
+  function renderTutorItem(item) {
+    const div = document.createElement('div');
+    div.className = 'tutor-item';
+    const wikiUrl = `https://en.wikipedia.org/wiki/${encodeURIComponent((item.concept || '').replace(/ /g, '_'))}`;
+    const badgeClass = item.type === 'prerequisite' ? 'prerequisite' : 'supporting';
+    div.innerHTML =
+      `<div class="concept"><a href="${wikiUrl}" rel="noopener">${escapeHtml(item.concept)}</a></div>` +
+      `<div class="tutor-meta">` +
+      `<span class="tutor-badge ${badgeClass}">${escapeHtml(item.type)}</span>` +
+      `<span class="relates-to">re: ${escapeHtml(item.relatesToArticle)}</span>` +
+      `</div>` +
+      `<div class="reason">${escapeHtml(item.reason)}</div>`;
+    div.querySelector('.concept a').addEventListener('click', (e) => {
+      e.preventDefault();
+      addNavEdge(item.relatesToArticle, item.concept);
+      if (!navChildrenMap[item.relatesToArticle]) navChildrenMap[item.relatesToArticle] = [];
+      if (!navChildrenMap[item.relatesToArticle].includes(item.concept)) {
+        navChildrenMap[item.relatesToArticle].push(item.concept);
+      }
+      window.open(wikiUrl, '_blank', 'noopener');
+    });
+    return div;
+  }
+
+  document.getElementById('btn-tree-insights').addEventListener('click', async () => {
+    const settings = await getSettings();
+    if (!settings.apiKey) { toast('Set your Gemini API key in Settings first.', 'error'); return; }
+    const treeArticles = getTreeArticles();
+    if (treeArticles.length < 2) { toast('This tree needs more articles for insights.', 'error'); return; }
+
+    const modal = document.getElementById('tree-rec-modal');
+    const loading = document.getElementById('tree-modal-loading');
+    const treeRecList = document.getElementById('tree-rec-list');
+    const treeGapList = document.getElementById('tree-gap-list');
+    const treeTutorList = document.getElementById('tree-tutor-list');
+    const treeTutorSection = document.getElementById('tree-tutor-section');
+
+    document.getElementById('tree-modal-sub').textContent =
+      `Based on ${treeArticles.length} articles in current tree · Gemini 3 Flash`;
+
+    const hasTutor = treeArticles.some((a) => a.status === 'learning' || a.status === 'confused');
+    treeTutorSection.classList.toggle('hidden', !hasTutor);
+
+    modal.classList.remove('hidden');
+    loading.classList.remove('hidden');
+    treeRecList.innerHTML = '';
+    treeGapList.innerHTML = '';
+    treeTutorList.innerHTML = '';
+
+    try {
+      const promises = [
+        getTreeRecommendations(treeArticles, settings.apiKey),
+        getTreeGapAnalysis(treeArticles, settings.apiKey)
+      ];
+      if (hasTutor) promises.push(getTutorRecommendations(treeArticles, settings.apiKey));
+
+      const [recs, gaps, tutorItems] = await Promise.all(promises);
+
+      treeRecList.innerHTML = '';
+      for (const r of recs) treeRecList.appendChild(renderRec(r));
+      treeGapList.innerHTML = '';
+      if (!gaps.length) treeGapList.innerHTML = '<div style="color: var(--muted); font-size: 13px;">No gaps identified.</div>';
+      for (const g of gaps) treeGapList.appendChild(renderGap(g));
+
+      if (hasTutor && tutorItems) {
+        treeTutorList.innerHTML = '';
+        for (const t of tutorItems) treeTutorList.appendChild(renderTutorItem(t));
+      }
+    } catch (err) {
+      treeRecList.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+    } finally {
+      loading.classList.add('hidden');
+    }
+  });
+
+  document.getElementById('tree-modal-close').addEventListener('click', () => {
+    document.getElementById('tree-rec-modal').classList.add('hidden');
+  });
+  document.querySelector('#tree-rec-modal .modal-backdrop').addEventListener('click', () => {
+    document.getElementById('tree-rec-modal').classList.add('hidden');
   });
 
   // --- Init ---

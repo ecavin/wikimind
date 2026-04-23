@@ -149,6 +149,10 @@
             <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
           </div>
         </div>
+        <button id="btn-tree-insights" class="ghost">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z"/></svg>
+          <span>Insights</span>
+        </button>
         <span class="tree-hint">Double-click a node to re-root</span>
       </div>
       <div class="tree-canvas-wrap">
@@ -240,6 +244,42 @@
         <section id="gap-section">
           <h3><span class="section-dot gap"></span> Gap analysis</h3>
           <div id="gap-list"></div>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <div id="tree-rec-modal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-panel">
+      <header>
+        <div class="modal-title-block">
+          <h2>Tree insights</h2>
+          <p class="modal-sub" id="tree-modal-sub">Based on articles in current tree · Gemini 3 Flash</p>
+        </div>
+        <button id="tree-modal-close" class="icon-btn" aria-label="Close">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </header>
+      <div id="tree-modal-body">
+        <div id="tree-modal-loading" class="loading hidden">
+          <div class="spinner"></div>
+          <div>
+            <div class="loading-title">Asking Gemini…</div>
+            <div class="loading-sub">Analyzing your tree</div>
+          </div>
+        </div>
+        <section id="tree-rec-section">
+          <h3><span class="section-dot"></span> Suggested reading</h3>
+          <div id="tree-rec-list"></div>
+        </section>
+        <section id="tree-gap-section">
+          <h3><span class="section-dot gap"></span> Gap analysis</h3>
+          <div id="tree-gap-list"></div>
+        </section>
+        <section id="tree-tutor-section" class="hidden">
+          <h3><span class="section-dot tutor"></span> Tutor suggestions</h3>
+          <div id="tree-tutor-list"></div>
         </section>
       </div>
     </div>

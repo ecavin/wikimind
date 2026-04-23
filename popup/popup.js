@@ -1,5 +1,5 @@
 (async function () {
-  const { getArticles, getStats } = window.WikimindStorage;
+  const { getArticles, getStats, getArticle, updateStatus } = window.WikimindStorage;
 
   const [articles, stats] = await Promise.all([getArticles(), getStats()]);
   document.getElementById('stat-articles').textContent = stats.totalArticles;
@@ -42,6 +42,28 @@
         chrome.tabs.create({ url: a.url });
       });
       list.appendChild(li);
+    }
+  }
+
+  // Status marking for currently active Wikipedia article
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const wikiMatch = tab?.url?.match(/^https:\/\/en\.wikipedia\.org\/wiki\/([^#?]+)/);
+  if (wikiMatch) {
+    const slug = decodeURIComponent(wikiMatch[1]).replace(/_/g, ' ');
+    const article = await getArticle(slug);
+    if (article) {
+      const section = document.getElementById('current-article-section');
+      document.getElementById('current-article-name').textContent = article.title;
+      section.classList.remove('hidden');
+      const btns = section.querySelectorAll('.status-btn');
+      const refresh = (status) => btns.forEach((b) => b.classList.toggle('status-btn--active', b.dataset.status === status));
+      refresh(article.status || '');
+      btns.forEach((btn) => btn.addEventListener('click', async () => {
+        const next = btn.dataset.status === article.status ? null : btn.dataset.status;
+        await updateStatus(article.title, next);
+        article.status = next;
+        refresh(next || '');
+      }));
     }
   }
 
