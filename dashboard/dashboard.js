@@ -35,6 +35,7 @@
   let treeRootTitle = null;
   let treeDepthVal = 99;
   let navChildrenMap = {}; // title → [child titles] from recorded navigation
+  const treeInsightsCache = new Map(); // treeRootTitle → {recs, gaps, tutorItems, hasTutor}
 
   // --- SVG defs (gradients, filters) ---
   const defs = svg.append('defs');
@@ -894,7 +895,37 @@
     return div;
   }
 
-  document.getElementById('btn-tree-insights').addEventListener('click', async () => {
+  function populateTreeInsightsModal({ recs, gaps, tutorItems, hasTutor }) {
+    const treeRecList = document.getElementById('tree-rec-list');
+    const treeGapList = document.getElementById('tree-gap-list');
+    const treeTutorList = document.getElementById('tree-tutor-list');
+    document.getElementById('tree-tutor-section').classList.toggle('hidden', !hasTutor);
+
+    treeRecList.innerHTML = '';
+    for (const r of recs) treeRecList.appendChild(renderRec(r));
+
+    treeGapList.innerHTML = '';
+    if (!gaps.length) treeGapList.innerHTML = '<div style="color: var(--muted); font-size: 13px;">No gaps identified.</div>';
+    for (const g of gaps) treeGapList.appendChild(renderGap(g));
+
+    if (hasTutor && tutorItems.length) {
+      treeTutorList.innerHTML = '';
+      for (const t of tutorItems) treeTutorList.appendChild(renderTutorItem(t));
+    }
+  }
+
+  async function fetchTreeInsights(treeArticles, apiKey) {
+    const hasTutor = treeArticles.some((a) => a.status === 'learning' || a.status === 'confused');
+    const promises = [
+      getTreeRecommendations(treeArticles, apiKey),
+      getTreeGapAnalysis(treeArticles, apiKey)
+    ];
+    if (hasTutor) promises.push(getTutorRecommendations(treeArticles, apiKey));
+    const [recs, gaps, tutorItems = []] = await Promise.all(promises);
+    return { recs, gaps, tutorItems, hasTutor };
+  }
+
+  async function runTreeInsights(forceRefresh = false) {
     const settings = await getSettings();
     if (!settings.apiKey) { toast('Set your Gemini API key in Settings first.', 'error'); return; }
     const treeArticles = getTreeArticles();
@@ -902,48 +933,36 @@
 
     const modal = document.getElementById('tree-rec-modal');
     const loading = document.getElementById('tree-modal-loading');
-    const treeRecList = document.getElementById('tree-rec-list');
-    const treeGapList = document.getElementById('tree-gap-list');
-    const treeTutorList = document.getElementById('tree-tutor-list');
-    const treeTutorSection = document.getElementById('tree-tutor-section');
+    const refreshBtn = document.getElementById('btn-tree-refresh');
 
     document.getElementById('tree-modal-sub').textContent =
       `Based on ${treeArticles.length} articles in current tree · Gemini 3 Flash`;
-
-    const hasTutor = treeArticles.some((a) => a.status === 'learning' || a.status === 'confused');
-    treeTutorSection.classList.toggle('hidden', !hasTutor);
-
     modal.classList.remove('hidden');
+
+    if (!forceRefresh && treeInsightsCache.has(treeRootTitle)) {
+      loading.classList.add('hidden');
+      populateTreeInsightsModal(treeInsightsCache.get(treeRootTitle));
+      return;
+    }
+
+    treeInsightsCache.delete(treeRootTitle);
     loading.classList.remove('hidden');
-    treeRecList.innerHTML = '';
-    treeGapList.innerHTML = '';
-    treeTutorList.innerHTML = '';
+    refreshBtn.disabled = true;
 
     try {
-      const promises = [
-        getTreeRecommendations(treeArticles, settings.apiKey),
-        getTreeGapAnalysis(treeArticles, settings.apiKey)
-      ];
-      if (hasTutor) promises.push(getTutorRecommendations(treeArticles, settings.apiKey));
-
-      const [recs, gaps, tutorItems] = await Promise.all(promises);
-
-      treeRecList.innerHTML = '';
-      for (const r of recs) treeRecList.appendChild(renderRec(r));
-      treeGapList.innerHTML = '';
-      if (!gaps.length) treeGapList.innerHTML = '<div style="color: var(--muted); font-size: 13px;">No gaps identified.</div>';
-      for (const g of gaps) treeGapList.appendChild(renderGap(g));
-
-      if (hasTutor && tutorItems) {
-        treeTutorList.innerHTML = '';
-        for (const t of tutorItems) treeTutorList.appendChild(renderTutorItem(t));
-      }
+      const data = await fetchTreeInsights(treeArticles, settings.apiKey);
+      treeInsightsCache.set(treeRootTitle, data);
+      populateTreeInsightsModal(data);
     } catch (err) {
-      treeRecList.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+      document.getElementById('tree-rec-list').innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
     } finally {
       loading.classList.add('hidden');
+      refreshBtn.disabled = false;
     }
-  });
+  }
+
+  document.getElementById('btn-tree-insights').addEventListener('click', () => runTreeInsights(false));
+  document.getElementById('btn-tree-refresh').addEventListener('click', () => runTreeInsights(true));
 
   document.getElementById('tree-modal-close').addEventListener('click', () => {
     document.getElementById('tree-rec-modal').classList.add('hidden');
