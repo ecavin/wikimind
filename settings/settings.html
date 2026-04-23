@@ -6,50 +6,140 @@
   <link rel="stylesheet" href="settings.css">
 </head>
 <body>
+  <div class="aurora" aria-hidden="true"></div>
+
   <main>
-    <h1>WikiMind Settings</h1>
-
-    <section>
-      <h2>Gemini API Key</h2>
-      <p class="hint">
-        Used for Recommendations, Gap Analysis, and Semantic Clustering. Stored locally in
-        <code>chrome.storage.local</code>. Sent only to <code>generativelanguage.googleapis.com</code>.
-      </p>
-      <input id="api-key" type="password" placeholder="AIza..." autocomplete="off">
-      <div id="key-status" class="status"></div>
-    </section>
-
-    <section>
-      <h2>Preferences</h2>
-      <label class="toggle">
-        <input id="auto-fetch" type="checkbox">
-        <span>Auto-fetch article links on visit</span>
-      </label>
-      <label class="toggle">
-        <input id="notifications" type="checkbox">
-        <span>Show visit notifications</span>
-      </label>
-    </section>
-
-    <section>
-      <h2>Data</h2>
-      <div class="actions">
-        <button id="export-btn">Export Data</button>
-        <button id="clear-btn" class="danger">Clear All Data</button>
+    <header class="page-hdr">
+      <div class="logo">
+        <svg viewBox="0 0 32 32" width="32" height="32" aria-hidden="true">
+          <defs>
+            <linearGradient id="logo-grad" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#a78bfa"/>
+              <stop offset="100%" stop-color="#f472b6"/>
+            </linearGradient>
+          </defs>
+          <circle cx="16" cy="16" r="14" fill="none" stroke="url(#logo-grad)" stroke-width="1.5" opacity="0.35"/>
+          <circle cx="8" cy="12" r="2.4" fill="url(#logo-grad)"/>
+          <circle cx="22" cy="9" r="2" fill="url(#logo-grad)" opacity="0.75"/>
+          <circle cx="24" cy="22" r="2.8" fill="url(#logo-grad)"/>
+          <circle cx="11" cy="23" r="1.8" fill="url(#logo-grad)" opacity="0.7"/>
+          <circle cx="16" cy="16" r="2" fill="#fff"/>
+          <path d="M8 12 L16 16 L22 9 M16 16 L24 22 M16 16 L11 23" stroke="url(#logo-grad)" stroke-width="1.2" fill="none" opacity="0.7"/>
+        </svg>
+        <div>
+          <h1>Settings</h1>
+          <p class="subtitle">Configure WikiMind</p>
+        </div>
       </div>
-    </section>
+    </header>
 
-    <section>
-      <h2>Stats</h2>
-      <dl id="stats">
-        <dt>Total articles read</dt><dd id="s-articles">–</dd>
-        <dt>Total connections</dt><dd id="s-connections">–</dd>
-        <dt>Most visited article</dt><dd id="s-mostvisited">–</dd>
-        <dt>Most common category</dt><dd id="s-category">–</dd>
-        <dt>Reading streak</dt><dd id="s-streak">–</dd>
-      </dl>
-    </section>
+    <div class="grid">
+      <section class="card span-2">
+        <div class="card-head">
+          <div class="card-icon" data-variant="key">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="15" r="4"/><path d="m10.85 12.15 8.65-8.65"/><path d="m18 5 3 3"/><path d="m15 8 3 3"/></svg>
+          </div>
+          <div>
+            <h2>Gemini API Key</h2>
+            <p class="hint">Powers Recommendations, Gap Analysis, and Clustering. Stored locally; sent only to <code>generativelanguage.googleapis.com</code>. Get a key at <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener">aistudio.google.com</a>.</p>
+          </div>
+        </div>
+        <div class="field-wrap">
+          <input id="api-key" type="password" placeholder="AIza•••••••••••••••••••••••••••••••••••••" autocomplete="off" spellcheck="false">
+          <button id="toggle-visibility" class="input-btn" aria-label="Show/hide key">
+            <svg class="eye-open" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+          </button>
+        </div>
+        <div id="key-status" class="status" aria-live="polite"></div>
+      </section>
+
+      <section class="card span-2">
+        <div class="card-head">
+          <div class="card-icon" data-variant="pref">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
+          </div>
+          <div>
+            <h2>Preferences</h2>
+            <p class="hint">Tweak how WikiMind behaves in the background.</p>
+          </div>
+        </div>
+        <label class="toggle">
+          <div class="toggle-text">
+            <span class="toggle-title">Auto-fetch article links</span>
+            <span class="toggle-sub">Pull outbound links from Wikipedia when you visit a new page.</span>
+          </div>
+          <input id="auto-fetch" type="checkbox">
+          <span class="switch"></span>
+        </label>
+        <label class="toggle">
+          <div class="toggle-text">
+            <span class="toggle-title">Visit notifications</span>
+            <span class="toggle-sub">Ping when a new article is tracked. Off by default.</span>
+          </div>
+          <input id="notifications" type="checkbox">
+          <span class="switch"></span>
+        </label>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <div class="card-icon" data-variant="stats">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg>
+          </div>
+          <div>
+            <h2>Stats</h2>
+            <p class="hint">Your reading snapshot.</p>
+          </div>
+        </div>
+        <dl id="stats">
+          <div class="stat-row"><dt>Articles read</dt><dd id="s-articles">–</dd></div>
+          <div class="stat-row"><dt>Connections</dt><dd id="s-connections">–</dd></div>
+          <div class="stat-row"><dt>Most visited</dt><dd id="s-mostvisited">–</dd></div>
+          <div class="stat-row"><dt>Top category</dt><dd id="s-category">–</dd></div>
+          <div class="stat-row"><dt>Reading streak</dt><dd id="s-streak">–</dd></div>
+        </dl>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <div class="card-icon" data-variant="data">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg>
+          </div>
+          <div>
+            <h2>Data</h2>
+            <p class="hint">Export your library or wipe everything clean.</p>
+          </div>
+        </div>
+        <div class="actions">
+          <button id="export-btn" class="btn">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Export JSON
+          </button>
+          <button id="clear-btn" class="btn danger">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+            Clear all
+          </button>
+        </div>
+      </section>
+    </div>
+
+    <footer class="foot">
+      <span>WikiMind · Local-first Wikipedia companion</span>
+      <a href="https://github.com/ecavin/wikimind" target="_blank" rel="noopener">GitHub ↗</a>
+    </footer>
   </main>
+
+  <div id="confirm-modal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-backdrop"></div>
+    <div class="modal-panel">
+      <h3>Delete all data?</h3>
+      <p>This wipes your entire WikiMind library — articles, connections, stats. Cannot be undone.</p>
+      <div class="modal-actions">
+        <button id="cancel-clear" class="btn">Cancel</button>
+        <button id="confirm-clear" class="btn danger-solid">Delete everything</button>
+      </div>
+    </div>
+  </div>
 
   <script src="../lib/storage.js"></script>
   <script src="settings.js"></script>

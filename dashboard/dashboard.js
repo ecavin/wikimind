@@ -12,17 +12,35 @@
   const legendEl = document.getElementById('cluster-legend');
   const listView = document.getElementById('list-view');
   const infoPanel = document.getElementById('info-panel');
+  const hud = document.getElementById('graph-hud');
+  const zoomControls = document.getElementById('zoom-controls');
+  const toastHost = document.getElementById('toast-host');
 
   // State
-  let articles = {};               // title -> article record
-  let nodes = [];                  // d3 nodes (copies of article records)
-  let links = [];                  // {source, target}
+  let articles = {};
+  let nodes = [];
+  let links = [];
   let simulation = null;
-  let colorMode = 'category';      // 'category' | 'cluster'
-  let clusterMap = null;           // title -> clusterName
+  let colorMode = 'category';
+  let clusterMap = null;
   let clusterColors = null;
   let categoryColors = null;
   let dateRange = { from: null, to: null };
+  let selectedId = null;
+  let currentTransform = d3.zoomIdentity;
+
+  // --- SVG defs (gradients, filters) ---
+  const defs = svg.append('defs');
+  defs.html(`
+    <linearGradient id="link-grad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#a78bfa" stop-opacity="0.8"/>
+      <stop offset="100%" stop-color="#f472b6" stop-opacity="0.8"/>
+    </linearGradient>
+    <radialGradient id="node-sheen" cx="35%" cy="30%" r="70%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.35"/>
+      <stop offset="60%" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+  `);
 
   const rootG = svg.append('g').attr('class', 'root');
   const linkLayer = rootG.append('g').attr('class', 'links');
@@ -31,7 +49,12 @@
 
   const zoom = d3.zoom()
     .scaleExtent([0.2, 6])
-    .on('zoom', (event) => rootG.attr('transform', event.transform));
+    .on('zoom', (event) => {
+      rootG.attr('transform', event.transform);
+      currentTransform = event.transform;
+      const z = document.getElementById('hud-zoom');
+      if (z) z.textContent = Math.round(event.transform.k * 100) + '%';
+    });
   svg.call(zoom);
 
   function sizeSvg() {
@@ -44,6 +67,20 @@
   }
   window.addEventListener('resize', sizeSvg);
 
+  // --- Toasts ---
+  function toast(msg, variant = '') {
+    const el = document.createElement('div');
+    el.className = 'toast-msg ' + variant;
+    el.textContent = msg;
+    toastHost.appendChild(el);
+    setTimeout(() => {
+      el.style.transition = 'opacity .25s, transform .25s';
+      el.style.opacity = '0';
+      el.style.transform = 'translateY(6px)';
+      setTimeout(() => el.remove(), 300);
+    }, 3200);
+  }
+
   async function loadData() {
     articles = await getArticles();
     const list = Object.values(articles);
@@ -51,16 +88,26 @@
     renderList(list);
 
     emptyState.classList.toggle('hidden', list.length > 0);
+    hud.classList.toggle('hidden', list.length === 0);
+    zoomControls.classList.toggle('hidden', list.length === 0);
+
     if (list.length >= 50) {
       document.getElementById('large-count').textContent = list.length;
       largeWarning.classList.remove('hidden');
     } else {
       largeWarning.classList.add('hidden');
     }
+
+    document.getElementById('list-count').textContent = `${list.length} article${list.length === 1 ? '' : 's'}`;
+    updateHud();
+  }
+
+  function updateHud() {
+    document.getElementById('hud-nodes').textContent = nodes.length;
+    document.getElementById('hud-edges').textContent = links.length;
   }
 
   function buildGraph(list) {
-    // Build nodes + dedup edges.
     nodes = list.map((a) => ({
       id: a.title,
       title: a.title,
@@ -86,9 +133,13 @@
       }
     }
 
-    // Color scales.
+    const palette = [
+      '#a78bfa', '#f472b6', '#5eead4', '#fbbf24', '#60a5fa',
+      '#f87171', '#c084fc', '#34d399', '#fb923c', '#818cf8',
+      '#e879f9', '#22d3ee'
+    ];
     const categories = Array.from(new Set(nodes.map((n) => n.categories[0] || 'Uncategorized')));
-    categoryColors = d3.scaleOrdinal(d3.schemeTableau10).domain(categories);
+    categoryColors = d3.scaleOrdinal(palette).domain(categories);
 
     render();
   }
@@ -111,25 +162,43 @@
     return true;
   }
 
+  function degreeOf(id) {
+    let d = 0;
+    for (const l of links) {
+      const sId = l.source.id || l.source;
+      const tId = l.target.id || l.target;
+      if (sId === id || tId === id) d++;
+    }
+    return d;
+  }
+
   function render() {
     sizeSvg();
 
-    // Visit-count threshold for always-on labels (top 20% or visitCount >= 3).
     const counts = nodes.map((n) => n.visitCount).sort((a, b) => b - a);
     const labelThreshold = counts[Math.floor(counts.length * 0.2)] || 3;
 
-    const linkSel = linkLayer.selectAll('line').data(links, (d) => `${d.source.id || d.source}-${d.target.id || d.target}`);
+    // Links
+    const linkSel = linkLayer.selectAll('line').data(
+      links,
+      (d) => `${d.source.id || d.source}-${d.target.id || d.target}`
+    );
     linkSel.exit().remove();
     const linkEnter = linkSel.enter().append('line').attr('class', 'link').attr('stroke-width', 1);
     const allLinks = linkEnter.merge(linkSel);
 
-    const nodeSel = nodeLayer.selectAll('circle').data(nodes, (d) => d.id);
+    // Node groups (halo + circle)
+    const nodeSel = nodeLayer.selectAll('g.node').data(nodes, (d) => d.id);
     nodeSel.exit().remove();
-    const nodeEnter = nodeSel.enter().append('circle').attr('class', 'node');
-    const allNodes = nodeEnter.merge(nodeSel)
-      .attr('r', radiusFor)
-      .attr('fill', colorFor)
-      .on('click', (event, d) => openInfo(d))
+    const nodeEnter = nodeSel.enter().append('g').attr('class', 'node');
+    nodeEnter.append('circle').attr('class', 'node-halo');
+    nodeEnter.append('circle').attr('class', 'node-core');
+
+    const allNodes = nodeEnter.merge(nodeSel);
+    allNodes
+      .attr('color', colorFor)
+      .style('color', colorFor)
+      .on('click', (event, d) => { event.stopPropagation(); selectNode(d); })
       .on('mouseenter', (event, d) => highlightNeighborhood(d))
       .on('mouseleave', () => clearHighlight())
       .call(d3.drag()
@@ -137,12 +206,22 @@
         .on('drag', (event, d) => { d.fx = event.x; d.fy = event.y; })
         .on('end', (event, d) => { if (!event.active) simulation.alphaTarget(0); d.fx = null; d.fy = null; }));
 
+    allNodes.select('circle.node-core')
+      .attr('r', radiusFor)
+      .attr('fill', colorFor)
+      .attr('stroke', 'rgba(7, 6, 14, 0.85)')
+      .attr('stroke-width', 1.5);
+
+    allNodes.select('circle.node-halo')
+      .attr('r', (d) => radiusFor(d) + 5);
+
+    // Labels
     const labelSel = labelLayer.selectAll('text').data(nodes, (d) => d.id);
     labelSel.exit().remove();
     const labelEnter = labelSel.enter().append('text').attr('class', 'node-label');
     const allLabels = labelEnter.merge(labelSel)
       .text((d) => d.title)
-      .attr('dx', 8)
+      .attr('dx', 10)
       .attr('dy', 4)
       .attr('opacity', (d) => d.visitCount >= labelThreshold ? 1 : 0);
 
@@ -154,16 +233,16 @@
 
     const r = graphContainer.getBoundingClientRect();
     simulation = d3.forceSimulation(nodes)
-      .force('link', d3.forceLink(links).id((d) => d.id).distance(80).strength(0.4))
-      .force('charge', d3.forceManyBody().strength(-260))
+      .force('link', d3.forceLink(links).id((d) => d.id).distance(85).strength(0.45))
+      .force('charge', d3.forceManyBody().strength(-280))
       .force('center', d3.forceCenter(r.width / 2, r.height / 2))
-      .force('collide', d3.forceCollide().radius((d) => radiusFor(d) + 4));
+      .force('collide', d3.forceCollide().radius((d) => radiusFor(d) + 5));
 
     if (colorMode === 'cluster' && clusterMap) {
       const clusterCenters = computeClusterCenters(r.width, r.height);
       simulation
-        .force('clusterX', d3.forceX((d) => (clusterCenters[clusterMap[d.id]] || {}).x || r.width / 2).strength(0.05))
-        .force('clusterY', d3.forceY((d) => (clusterCenters[clusterMap[d.id]] || {}).y || r.height / 2).strength(0.05));
+        .force('clusterX', d3.forceX((d) => (clusterCenters[clusterMap[d.id]] || {}).x || r.width / 2).strength(0.06))
+        .force('clusterY', d3.forceY((d) => (clusterCenters[clusterMap[d.id]] || {}).y || r.height / 2).strength(0.06));
     }
 
     simulation.on('tick', () => {
@@ -172,11 +251,10 @@
         .attr('y1', (d) => d.source.y)
         .attr('x2', (d) => d.target.x)
         .attr('y2', (d) => d.target.y);
-      allNodes.attr('cx', (d) => d.x).attr('cy', (d) => d.y);
+      allNodes.attr('transform', (d) => `translate(${d.x}, ${d.y})`);
       allLabels.attr('x', (d) => d.x).attr('y', (d) => d.y);
     });
 
-    // Hover-only labels: show on mouseenter, restore on mouseleave.
     allNodes.on('mouseover.label', (event, d) => {
       labelLayer.selectAll('text').filter((x) => x.id === d.id).attr('opacity', 1);
     });
@@ -184,6 +262,8 @@
       labelLayer.selectAll('text').filter((x) => x.id === d.id)
         .attr('opacity', d.visitCount >= labelThreshold ? 1 : 0);
     });
+
+    updateHud();
   }
 
   function computeClusterCenters(width, height) {
@@ -207,8 +287,9 @@
       if (sId === d.id) neighborIds.add(tId);
       if (tId === d.id) neighborIds.add(sId);
     }
-    nodeLayer.selectAll('circle').classed('dim', (x) => !neighborIds.has(x.id));
-    nodeLayer.selectAll('circle').classed('highlight', (x) => x.id === d.id);
+    nodeLayer.selectAll('g.node')
+      .classed('dim', (x) => !neighborIds.has(x.id))
+      .classed('highlight', (x) => x.id === d.id);
     labelLayer.selectAll('text').classed('dim', (x) => !neighborIds.has(x.id));
     linkLayer.selectAll('line')
       .classed('highlight', (l) => (l.source.id === d.id) || (l.target.id === d.id))
@@ -216,9 +297,17 @@
   }
 
   function clearHighlight() {
-    nodeLayer.selectAll('circle').classed('highlight', false).classed('dim', (d) => !inDateRange(d));
+    nodeLayer.selectAll('g.node')
+      .classed('highlight', false)
+      .classed('dim', (d) => !inDateRange(d));
     labelLayer.selectAll('text').classed('dim', (d) => !inDateRange(d));
     linkLayer.selectAll('line').classed('highlight', false).classed('dim', false);
+  }
+
+  function selectNode(d) {
+    selectedId = d.id;
+    nodeLayer.selectAll('g.node').classed('selected', (x) => x.id === d.id);
+    openInfo(d);
   }
 
   function openInfo(d) {
@@ -226,16 +315,20 @@
     document.getElementById('info-title').textContent = d.title;
     document.getElementById('info-summary').textContent = d.summary || '(No summary captured.)';
     document.getElementById('info-visits').textContent = d.visitCount;
-    document.getElementById('info-first').textContent = new Date(d.firstVisited).toLocaleString();
-    document.getElementById('info-last').textContent = new Date(d.lastVisited).toLocaleString();
-    const open = document.getElementById('info-open');
-    open.href = d.url;
+    document.getElementById('info-age').textContent = formatRelative(d.firstVisited);
+    document.getElementById('info-degree').textContent = degreeOf(d.id);
+
+    const badge = document.getElementById('info-badge');
+    const firstCat = (d.categories || [])[0];
+    badge.textContent = firstCat || 'Article';
+
+    document.getElementById('info-open').href = d.url;
 
     const chipsEl = document.getElementById('info-links');
     chipsEl.innerHTML = '';
     const neighbors = d.links.filter((t) => articles[t]);
     if (neighbors.length === 0) {
-      chipsEl.innerHTML = '<span style="color: var(--muted); font-size:12px;">No connections yet. Try "Fetch Links".</span>';
+      chipsEl.innerHTML = '<span style="color: var(--muted); font-size:12px;">No connections yet. Try Refresh.</span>';
     } else {
       for (const t of neighbors) {
         const chip = document.createElement('span');
@@ -247,19 +340,28 @@
     }
   }
 
+  function formatRelative(ts) {
+    if (!ts) return '—';
+    const diff = Date.now() - ts;
+    const days = Math.floor(diff / 86400000);
+    if (days < 1) return 'today';
+    if (days === 1) return 'yesterday';
+    if (days < 7) return `${days}d ago`;
+    if (days < 30) return `${Math.floor(days / 7)}w ago`;
+    if (days < 365) return `${Math.floor(days / 30)}mo ago`;
+    return `${Math.floor(days / 365)}y ago`;
+  }
+
   function focusNode(title) {
     const n = nodes.find((x) => x.id === title);
     if (!n) return;
-    openInfo(n);
+    selectNode(n);
     const r = graphContainer.getBoundingClientRect();
     const scale = 2;
     const tx = r.width / 2 - n.x * scale;
     const ty = r.height / 2 - n.y * scale;
     svg.transition().duration(700)
       .call(zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(scale));
-    // Briefly highlight.
-    nodeLayer.selectAll('circle').classed('highlight', (x) => x.id === title);
-    setTimeout(() => nodeLayer.selectAll('circle').classed('highlight', false), 1400);
   }
 
   function renderList(list) {
@@ -275,12 +377,22 @@
       link.rel = 'noopener';
       link.textContent = a.title;
       tdTitle.appendChild(link);
+
       const tdVisits = document.createElement('td');
+      tdVisits.className = 'num';
       tdVisits.textContent = a.visitCount;
+
       const tdLast = document.createElement('td');
       tdLast.textContent = new Date(a.lastVisited).toLocaleString();
+
       const tdCats = document.createElement('td');
-      tdCats.textContent = (a.categories || []).slice(0, 3).join(', ');
+      (a.categories || []).slice(0, 3).forEach((c) => {
+        const chip = document.createElement('span');
+        chip.className = 'cat-chip';
+        chip.textContent = c;
+        tdCats.appendChild(chip);
+      });
+
       tr.appendChild(tdTitle);
       tr.appendChild(tdVisits);
       tr.appendChild(tdLast);
@@ -299,12 +411,25 @@
     if (hit) focusNode(hit.id);
   });
 
+  document.addEventListener('keydown', (e) => {
+    if (e.key === '/' && !['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) {
+      e.preventDefault();
+      document.getElementById('search').focus();
+    }
+    if (e.key === 'Escape') {
+      document.getElementById('recommend-modal').classList.add('hidden');
+      infoPanel.classList.add('hidden');
+      nodeLayer.selectAll('g.node').classed('selected', false);
+      selectedId = null;
+    }
+  });
+
   function applyDateFilter() {
     const fromStr = document.getElementById('date-from').value;
     const toStr = document.getElementById('date-to').value;
     dateRange.from = fromStr ? new Date(fromStr).getTime() : null;
     dateRange.to = toStr ? new Date(toStr + 'T23:59:59').getTime() : null;
-    nodeLayer.selectAll('circle').classed('dim', (d) => !inDateRange(d));
+    nodeLayer.selectAll('g.node').classed('dim', (d) => !inDateRange(d));
     labelLayer.selectAll('text').classed('dim', (d) => !inDateRange(d));
   }
   document.getElementById('date-from').addEventListener('change', applyDateFilter);
@@ -312,40 +437,51 @@
 
   document.getElementById('btn-fetch-links').addEventListener('click', () => {
     const btn = document.getElementById('btn-fetch-links');
+    const label = btn.querySelector('span');
+    const originalLabel = label.textContent;
     btn.disabled = true;
-    btn.textContent = 'Fetching…';
+    label.textContent = 'Fetching…';
     const port = chrome.runtime.connect({ name: 'refetch-all-links' });
     port.onMessage.addListener((msg) => {
-      if (msg.type === 'PROGRESS') btn.textContent = `Fetching ${msg.done}/${msg.total}…`;
+      if (msg.type === 'PROGRESS') label.textContent = `${msg.done}/${msg.total}`;
       if (msg.type === 'DONE') {
-        btn.textContent = 'Fetch Links';
+        label.textContent = originalLabel;
         btn.disabled = false;
         loadData();
+        toast(`Refreshed ${msg.total || 'all'} articles`, 'success');
       }
       if (msg.type === 'ERROR') {
-        btn.textContent = 'Fetch Links';
+        label.textContent = originalLabel;
         btn.disabled = false;
-        alert('Error: ' + msg.error);
+        toast('Error: ' + msg.error, 'error');
       }
     });
   });
 
   document.getElementById('btn-toggle-view').addEventListener('click', () => {
+    const btn = document.getElementById('btn-toggle-view');
+    const label = btn.querySelector('span');
     const showingList = !listView.classList.contains('hidden');
     if (showingList) {
       listView.classList.add('hidden');
       document.getElementById('graph-container').classList.remove('hidden');
       infoPanel.classList.add('hidden');
-      document.getElementById('btn-toggle-view').textContent = 'List View';
+      label.textContent = 'List';
+      btn.classList.remove('active');
     } else {
       listView.classList.remove('hidden');
       document.getElementById('graph-container').classList.add('hidden');
       infoPanel.classList.add('hidden');
-      document.getElementById('btn-toggle-view').textContent = 'Graph View';
+      label.textContent = 'Graph';
+      btn.classList.add('active');
     }
   });
 
-  document.getElementById('info-close').addEventListener('click', () => infoPanel.classList.add('hidden'));
+  document.getElementById('info-close').addEventListener('click', () => {
+    infoPanel.classList.add('hidden');
+    nodeLayer.selectAll('g.node').classed('selected', false);
+    selectedId = null;
+  });
 
   document.getElementById('btn-dismiss-warning').addEventListener('click', () => largeWarning.classList.add('hidden'));
   document.getElementById('btn-filter-30').addEventListener('click', () => {
@@ -357,10 +493,22 @@
     largeWarning.classList.add('hidden');
   });
 
+  // --- Zoom controls ---
+  document.getElementById('zoom-in').addEventListener('click', () => {
+    svg.transition().duration(250).call(zoom.scaleBy, 1.4);
+  });
+  document.getElementById('zoom-out').addEventListener('click', () => {
+    svg.transition().duration(250).call(zoom.scaleBy, 0.7);
+  });
+  document.getElementById('zoom-reset').addEventListener('click', () => {
+    svg.transition().duration(400).call(zoom.transform, d3.zoomIdentity);
+  });
+
   // --- Cluster mode ---
 
   document.getElementById('btn-cluster').addEventListener('click', async () => {
     const btn = document.getElementById('btn-cluster');
+    const label = btn.querySelector('span');
     if (colorMode === 'cluster') {
       colorMode = 'category';
       clusterMap = null;
@@ -370,37 +518,42 @@
       return;
     }
     const settings = await getSettings();
-    if (!settings.apiKey) { alert('Set your Gemini API key in Settings first.'); return; }
+    if (!settings.apiKey) { toast('Set your Gemini API key in Settings first.', 'error'); return; }
     const list = Object.values(articles);
     if (list.length === 0) return;
     btn.disabled = true;
-    btn.textContent = 'Clustering…';
+    label.textContent = 'Clustering…';
     try {
       const clusters = await clusterArticles(list, settings.apiKey);
       clusterMap = {};
       for (const c of clusters) {
         for (const t of c.articles) clusterMap[t] = c.clusterName;
       }
-      // Fill in any unmapped articles.
       for (const a of list) if (!clusterMap[a.title]) clusterMap[a.title] = 'Unclustered';
       const names = Array.from(new Set(Object.values(clusterMap)));
-      clusterColors = d3.scaleOrdinal(d3.schemeSet3.concat(d3.schemeTableau10)).domain(names);
+      const richPalette = [
+        '#a78bfa', '#f472b6', '#5eead4', '#fbbf24', '#60a5fa',
+        '#f87171', '#c084fc', '#34d399', '#fb923c', '#818cf8',
+        '#e879f9', '#22d3ee', '#fde047', '#4ade80'
+      ];
+      clusterColors = d3.scaleOrdinal(richPalette).domain(names);
       colorMode = 'cluster';
       btn.classList.add('active');
       renderLegend(names);
       render();
+      toast(`Found ${names.length} clusters`, 'success');
     } catch (err) {
-      alert('Clustering failed: ' + err.message);
+      toast('Clustering failed: ' + err.message, 'error');
     } finally {
       btn.disabled = false;
-      btn.textContent = 'Cluster';
+      label.textContent = 'Cluster';
     }
   });
 
   function renderLegend(names) {
     legendEl.innerHTML = '<h3>Clusters</h3>' + names.map((n) => {
       const color = clusterColors(n);
-      return `<div class="legend-item"><span class="legend-swatch" style="background:${color}"></span>${escapeHtml(n)}</div>`;
+      return `<div class="legend-item" style="color:${color}"><span class="legend-swatch" style="background:${color}"></span><span style="color:var(--fg)">${escapeHtml(n)}</span></div>`;
     }).join('');
     legendEl.classList.remove('hidden');
   }
@@ -413,9 +566,9 @@
 
   document.getElementById('btn-recommend').addEventListener('click', async () => {
     const settings = await getSettings();
-    if (!settings.apiKey) { alert('Set your Gemini API key in Settings first.'); return; }
+    if (!settings.apiKey) { toast('Set your Gemini API key in Settings first.', 'error'); return; }
     const list = Object.values(articles);
-    if (list.length < 2) { alert('Read a few articles first.'); return; }
+    if (list.length < 2) { toast('Read a few articles first.', 'error'); return; }
 
     const modal = document.getElementById('recommend-modal');
     const loading = document.getElementById('modal-loading');

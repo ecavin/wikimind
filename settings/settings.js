@@ -5,6 +5,8 @@
   const autoFetch = document.getElementById('auto-fetch');
   const notifications = document.getElementById('notifications');
   const keyStatus = document.getElementById('key-status');
+  const toggleVis = document.getElementById('toggle-visibility');
+  const confirmModal = document.getElementById('confirm-modal');
 
   const settings = await getSettings();
   apiKeyInput.value = settings.apiKey || '';
@@ -14,13 +16,17 @@
   function flash(msg, cls) {
     keyStatus.textContent = msg;
     keyStatus.className = 'status ' + (cls || '');
-    setTimeout(() => { keyStatus.textContent = ''; keyStatus.className = 'status'; }, 2000);
+    setTimeout(() => { keyStatus.textContent = ''; keyStatus.className = 'status'; }, 2200);
   }
 
   apiKeyInput.addEventListener('blur', async () => {
     const v = apiKeyInput.value.trim();
     await setSettings({ apiKey: v });
-    flash(v ? 'API key saved.' : 'API key cleared.', 'success');
+    flash(v ? 'API key saved' : 'API key cleared', 'success');
+  });
+
+  toggleVis.addEventListener('click', () => {
+    apiKeyInput.type = apiKeyInput.type === 'password' ? 'text' : 'password';
   });
 
   autoFetch.addEventListener('change', async () => {
@@ -44,11 +50,22 @@
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   });
 
-  document.getElementById('clear-btn').addEventListener('click', async () => {
-    if (!confirm('Delete ALL WikiMind data? This cannot be undone.')) return;
+  function openModal() { confirmModal.classList.remove('hidden'); }
+  function closeModal() { confirmModal.classList.add('hidden'); }
+
+  document.getElementById('clear-btn').addEventListener('click', openModal);
+  document.getElementById('cancel-clear').addEventListener('click', closeModal);
+  confirmModal.querySelector('.modal-backdrop').addEventListener('click', closeModal);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
+
+  document.getElementById('confirm-clear').addEventListener('click', async () => {
     await clearAll();
+    closeModal();
     await renderStats();
-    alert('All data cleared.');
+    apiKeyInput.value = '';
+    autoFetch.checked = false;
+    notifications.checked = false;
+    flash('All data cleared', 'success');
   });
 
   async function renderStats() {

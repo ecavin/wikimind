@@ -6,18 +6,62 @@
   <link rel="stylesheet" href="dashboard.css">
 </head>
 <body>
+  <div class="aurora" aria-hidden="true"></div>
+
   <header id="topbar">
-    <div class="brand">WikiMind</div>
-    <input id="search" type="search" placeholder="Search articles…" autocomplete="off">
-    <div class="filters">
-      <label>From <input id="date-from" type="date"></label>
-      <label>To <input id="date-to" type="date"></label>
+    <div class="brand-block">
+      <svg viewBox="0 0 32 32" width="28" height="28" aria-hidden="true">
+        <defs>
+          <linearGradient id="logo-grad" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#a78bfa"/>
+            <stop offset="100%" stop-color="#f472b6"/>
+          </linearGradient>
+        </defs>
+        <circle cx="16" cy="16" r="14" fill="none" stroke="url(#logo-grad)" stroke-width="1.5" opacity="0.35"/>
+        <circle cx="8" cy="12" r="2.4" fill="url(#logo-grad)"/>
+        <circle cx="22" cy="9" r="2" fill="url(#logo-grad)" opacity="0.75"/>
+        <circle cx="24" cy="22" r="2.8" fill="url(#logo-grad)"/>
+        <circle cx="11" cy="23" r="1.8" fill="url(#logo-grad)" opacity="0.7"/>
+        <circle cx="16" cy="16" r="2" fill="#fff"/>
+        <path d="M8 12 L16 16 L22 9 M16 16 L24 22 M16 16 L11 23" stroke="url(#logo-grad)" stroke-width="1.2" fill="none" opacity="0.7"/>
+      </svg>
+      <span class="brand">WikiMind</span>
     </div>
+
+    <div class="search-wrap">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+      <input id="search" type="search" placeholder="Search articles…" autocomplete="off">
+      <kbd>/</kbd>
+    </div>
+
+    <div class="filters">
+      <div class="date-field">
+        <label>From</label>
+        <input id="date-from" type="date">
+      </div>
+      <div class="date-field">
+        <label>To</label>
+        <input id="date-to" type="date">
+      </div>
+    </div>
+
     <div class="controls">
-      <button id="btn-fetch-links" title="Re-fetch links for all articles">Fetch Links</button>
-      <button id="btn-toggle-view">List View</button>
-      <button id="btn-cluster">Cluster</button>
-      <button id="btn-recommend" class="primary">Recommend</button>
+      <button id="btn-fetch-links" class="ghost" title="Re-fetch links for all articles">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>
+        <span>Refresh</span>
+      </button>
+      <button id="btn-toggle-view" class="ghost">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+        <span>List</span>
+      </button>
+      <button id="btn-cluster" class="ghost">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="18" r="3"/></svg>
+        <span>Cluster</span>
+      </button>
+      <button id="btn-recommend" class="primary">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 L14.5 9 L22 9 L16 13.5 L18.2 21 L12 16.5 L5.8 21 L8 13.5 L2 9 L9.5 9 Z"/></svg>
+        <span>Recommend</span>
+      </button>
     </div>
   </header>
 
@@ -25,38 +69,93 @@
     <div id="graph-container">
       <svg id="graph"></svg>
       <div id="empty-state" class="empty-state hidden">
-        <h2>Nothing to show yet</h2>
-        <p>Visit some Wikipedia articles and they'll appear here as a graph.</p>
+        <div class="empty-art">
+          <svg viewBox="0 0 120 120" width="96" height="96">
+            <defs>
+              <linearGradient id="es-grad" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0%" stop-color="#a78bfa" stop-opacity="0.5"/>
+                <stop offset="100%" stop-color="#f472b6" stop-opacity="0.5"/>
+              </linearGradient>
+            </defs>
+            <circle cx="30" cy="40" r="8" fill="url(#es-grad)"/>
+            <circle cx="80" cy="30" r="6" fill="url(#es-grad)" opacity="0.7"/>
+            <circle cx="90" cy="80" r="10" fill="url(#es-grad)"/>
+            <circle cx="40" cy="90" r="7" fill="url(#es-grad)" opacity="0.8"/>
+            <circle cx="60" cy="60" r="9" fill="url(#es-grad)"/>
+            <line x1="30" y1="40" x2="60" y2="60" stroke="url(#es-grad)" stroke-width="1.5" opacity="0.4"/>
+            <line x1="80" y1="30" x2="60" y2="60" stroke="url(#es-grad)" stroke-width="1.5" opacity="0.4"/>
+            <line x1="60" y1="60" x2="90" y2="80" stroke="url(#es-grad)" stroke-width="1.5" opacity="0.4"/>
+            <line x1="60" y1="60" x2="40" y2="90" stroke="url(#es-grad)" stroke-width="1.5" opacity="0.4"/>
+          </svg>
+        </div>
+        <h2>Your graph is empty</h2>
+        <p>Start reading Wikipedia — articles and their connections will grow here.</p>
+        <a class="empty-cta" href="https://en.wikipedia.org/wiki/Special:Random" target="_blank" rel="noopener">
+          Open a random article
+          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7"/><path d="M7 7h10v10"/></svg>
+        </a>
       </div>
       <div id="large-warning" class="toast hidden">
-        <span>You have <b id="large-count">0</b> articles — graph may be slow.</span>
-        <button id="btn-filter-30">Filter to last 30 days</button>
-        <button id="btn-dismiss-warning" class="subtle">Dismiss</button>
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        <span><b id="large-count">0</b> articles — graph may be slow.</span>
+        <button id="btn-filter-30">Last 30 days</button>
+        <button id="btn-dismiss-warning" class="subtle" aria-label="Dismiss">×</button>
       </div>
       <div id="cluster-legend" class="legend hidden"></div>
+      <div id="graph-hud" class="hud hidden">
+        <span class="hud-item"><b id="hud-nodes">0</b> nodes</span>
+        <span class="hud-dot"></span>
+        <span class="hud-item"><b id="hud-edges">0</b> edges</span>
+        <span class="hud-dot"></span>
+        <span class="hud-item"><b id="hud-zoom">100%</b></span>
+      </div>
+      <div id="zoom-controls" class="zoom-controls hidden">
+        <button id="zoom-in" aria-label="Zoom in">+</button>
+        <button id="zoom-out" aria-label="Zoom out">−</button>
+        <button id="zoom-reset" aria-label="Reset">⊙</button>
+      </div>
     </div>
 
     <div id="list-view" class="hidden">
+      <div class="list-header">
+        <h2>All articles</h2>
+        <span class="list-count" id="list-count"></span>
+      </div>
       <table>
         <thead>
-          <tr><th>Title</th><th>Visits</th><th>Last Visited</th><th>Categories</th></tr>
+          <tr><th>Title</th><th class="num">Visits</th><th>Last Visited</th><th>Categories</th></tr>
         </thead>
         <tbody id="list-body"></tbody>
       </table>
     </div>
 
     <aside id="info-panel" class="hidden">
-      <button id="info-close" class="icon-btn" aria-label="Close">×</button>
+      <button id="info-close" class="icon-btn" aria-label="Close">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+      <div class="info-badge" id="info-badge">Article</div>
       <h2 id="info-title"></h2>
       <p id="info-summary"></p>
-      <dl>
-        <dt>Visits</dt><dd id="info-visits"></dd>
-        <dt>First</dt><dd id="info-first"></dd>
-        <dt>Last</dt><dd id="info-last"></dd>
-      </dl>
-      <h3>Linked articles</h3>
+      <div class="info-stats">
+        <div class="info-stat">
+          <span class="info-stat-val" id="info-visits"></span>
+          <span class="info-stat-lbl">visits</span>
+        </div>
+        <div class="info-stat">
+          <span class="info-stat-val" id="info-age"></span>
+          <span class="info-stat-lbl">first seen</span>
+        </div>
+        <div class="info-stat">
+          <span class="info-stat-val" id="info-degree"></span>
+          <span class="info-stat-lbl">links</span>
+        </div>
+      </div>
+      <h3>Connected articles</h3>
       <div id="info-links" class="chips"></div>
-      <a id="info-open" href="#" target="_blank" rel="noopener">Open on Wikipedia →</a>
+      <a id="info-open" href="#" target="_blank" rel="noopener">
+        <span>Open on Wikipedia</span>
+        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7"/><path d="M7 7h10v10"/></svg>
+      </a>
     </aside>
   </main>
 
@@ -64,25 +163,35 @@
     <div class="modal-backdrop"></div>
     <div class="modal-panel">
       <header>
-        <h2>Recommendations</h2>
-        <button id="modal-close" class="icon-btn" aria-label="Close">×</button>
+        <div class="modal-title-block">
+          <h2>Your recommendations</h2>
+          <p class="modal-sub">Powered by Gemini 3 Flash</p>
+        </div>
+        <button id="modal-close" class="icon-btn" aria-label="Close">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
       </header>
       <div id="modal-body">
         <div id="modal-loading" class="loading hidden">
           <div class="spinner"></div>
-          <span>Asking Gemini…</span>
+          <div>
+            <div class="loading-title">Asking Gemini…</div>
+            <div class="loading-sub">Analyzing your reading history</div>
+          </div>
         </div>
         <section id="rec-section">
-          <h3>Suggested reading</h3>
+          <h3><span class="section-dot"></span> Suggested reading</h3>
           <div id="rec-list"></div>
         </section>
         <section id="gap-section">
-          <h3>Gap Analysis</h3>
+          <h3><span class="section-dot gap"></span> Gap analysis</h3>
           <div id="gap-list"></div>
         </section>
       </div>
     </div>
   </div>
+
+  <div id="toast-host" class="toast-host"></div>
 
   <script src="vendor/d3.min.js"></script>
   <script src="../lib/storage.js"></script>
