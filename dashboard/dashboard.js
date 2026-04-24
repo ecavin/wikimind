@@ -1,7 +1,8 @@
 // dashboard/dashboard.js — D3 force graph, list view, cluster + recommendation UI.
 
 (async function () {
-  const { getArticles, getSettings, getNavEdges, updateStatus, addNavEdge } = window.WikimindStorage;
+  const { getArticles, getSettings, getNavEdges, updateStatus, addNavEdge,
+          getClusterState, setClusterState } = window.WikimindStorage;
   const { fetchSummary } = window.WikimindWikipedia;
   const { getRecommendations, getGapAnalysis, clusterArticles,
           getTreeRecommendations, getTreeGapAnalysis, getTutorRecommendations } = window.WikimindLLM;
@@ -23,6 +24,8 @@
   let articles = {};
   let nodes = [];
   let links = [];
+  let baseLinks = [];          // links derived from article.links (Wikipedia-explicit)
+  let aiEdges = [];            // AI-inferred edges (cluster mode only)
   let simulation = null;
   let colorMode = 'category';
   let clusterMap = null;
@@ -36,6 +39,10 @@
   let treeDepthVal = 99;
   let navChildrenMap = {}; // title → [child titles] from recorded navigation
   const treeInsightsCache = new Map(); // treeRootTitle → {recs, gaps, tutorItems, hasTutor}
+  let degreeMap = {};          // id → connection count
+  let relationshipMap = new Map();  // "from\x01to" → description
+  let superClusters = [];      // [{name, children, parent}]
+  let priorClusterState = null; // persisted snapshot for incremental clustering
 
   // --- SVG defs (gradients, filters) ---
   const defs = svg.append('defs');
@@ -51,7 +58,9 @@
   `);
 
   const rootG = svg.append('g').attr('class', 'root');
+  const superLayer = rootG.append('g').attr('class', 'super-clusters');
   const linkLayer = rootG.append('g').attr('class', 'links');
+  const linkHitLayer = rootG.append('g').attr('class', 'link-hits');
   const nodeLayer = rootG.append('g').attr('class', 'nodes');
   const labelLayer = rootG.append('g').attr('class', 'labels');
 
@@ -92,6 +101,7 @@
   async function loadData() {
     articles = await getArticles();
     const navEdges = await getNavEdges();
+    priorClusterState = await getClusterState();
 
     // Build children map from stored navigation edges.
     navChildrenMap = {};
@@ -106,6 +116,12 @@
 
     const list = Object.values(articles);
     buildGraph(list);
+
+    // Hydrate cluster visualization from persisted snapshot.
+    if (priorClusterState && priorClusterState.clusterMap) {
+      applyClusterState(priorClusterState, /*activate=*/true);
+    }
+
     renderList(list);
 
     emptyState.classList.toggle('hidden', list.length > 0);
@@ -145,16 +161,17 @@
 
     const present = new Set(nodes.map((n) => n.id));
     const edgeSet = new Set();
-    links = [];
+    baseLinks = [];
     for (const n of nodes) {
       for (const other of n.links) {
         if (!present.has(other) || other === n.id) continue;
         const key = [n.id, other].sort().join('\u0001');
         if (edgeSet.has(key)) continue;
         edgeSet.add(key);
-        links.push({ source: n.id, target: other });
+        baseLinks.push({ source: n.id, target: other });
       }
     }
+    recomputeLinks();
 
     const palette = [
       '#a78bfa', '#f472b6', '#5eead4', '#fbbf24', '#60a5fa',
@@ -167,7 +184,68 @@
     render();
   }
 
-  function radiusFor(n) { return 4 + Math.sqrt(n.visitCount) * 3; }
+  function radiusFor(n) { return 4 + Math.sqrt(degreeMap[n.id] || 0) * 3; }
+
+  function recomputeLinks() {
+    // Merge AI-inferred edges into display link set when cluster mode is active.
+    const present = new Set(nodes.map((n) => n.id));
+    const merged = baseLinks.slice();
+    if (colorMode === 'cluster' && aiEdges.length) {
+      const have = new Set(baseLinks.map((l) => {
+        const s = l.source.id || l.source;
+        const t = l.target.id || l.target;
+        return [s, t].sort().join('\u0001');
+      }));
+      for (const e of aiEdges) {
+        const s = e.source.id || e.source;
+        const t = e.target.id || e.target;
+        if (!present.has(s) || !present.has(t)) continue;
+        const key = [s, t].sort().join('\u0001');
+        if (have.has(key)) continue;
+        have.add(key);
+        merged.push({ source: s, target: t, aiOnly: true });
+      }
+    }
+    links = merged;
+    computeDegreeMap();
+  }
+
+  function computeDegreeMap() {
+    degreeMap = {};
+    for (const l of links) {
+      const s = l.source.id || l.source;
+      const t = l.target.id || l.target;
+      degreeMap[s] = (degreeMap[s] || 0) + 1;
+      degreeMap[t] = (degreeMap[t] || 0) + 1;
+    }
+  }
+
+  function relKey(a, b) { return a + '\u0001' + b; }
+
+  function lookupRelationship(a, b) {
+    const ab = relationshipMap.get(relKey(a, b));
+    if (ab) return { description: ab, from: a, to: b };
+    const ba = relationshipMap.get(relKey(b, a));
+    if (ba) return { description: ba, from: b, to: a };
+    return null;
+  }
+
+  function computeAiEdgesFromRelationships() {
+    const present = new Set(Object.keys(articles));
+    const seen = new Set();
+    aiEdges = [];
+    for (const [key] of relationshipMap) {
+      const sep = key.indexOf('\u0001');
+      if (sep === -1) continue;
+      const from = key.slice(0, sep);
+      const to = key.slice(sep + 1);
+      if (!present.has(from) || !present.has(to) || from === to) continue;
+      const canon = [from, to].sort().join('\u0001');
+      if (seen.has(canon)) continue;
+      seen.add(canon);
+      aiEdges.push({ source: from, target: to, aiOnly: true });
+    }
+  }
 
   function colorFor(n) {
     if (n.status && STATUS_COLORS[n.status]) return STATUS_COLORS[n.status];
@@ -186,15 +264,7 @@
     return true;
   }
 
-  function degreeOf(id) {
-    let d = 0;
-    for (const l of links) {
-      const sId = l.source.id || l.source;
-      const tId = l.target.id || l.target;
-      if (sId === id || tId === id) d++;
-    }
-    return d;
-  }
+  function degreeOf(id) { return degreeMap[id] || 0; }
 
   function render() {
     sizeSvg();
@@ -203,13 +273,33 @@
     const labelThreshold = counts[Math.floor(counts.length * 0.2)] || 3;
 
     // Links
-    const linkSel = linkLayer.selectAll('line').data(
-      links,
-      (d) => `${d.source.id || d.source}-${d.target.id || d.target}`
-    );
+    const linkKey = (d) => `${d.source.id || d.source}-${d.target.id || d.target}`;
+    const linkSel = linkLayer.selectAll('line').data(links, linkKey);
     linkSel.exit().remove();
     const linkEnter = linkSel.enter().append('line').attr('class', 'link').attr('stroke-width', 1);
     const allLinks = linkEnter.merge(linkSel);
+    allLinks.classed('ai-only', (d) => !!d.aiOnly);
+
+    // Invisible wider hit targets for edge hover tooltips.
+    const hitSel = linkHitLayer.selectAll('line').data(links, linkKey);
+    hitSel.exit().remove();
+    const hitEnter = hitSel.enter().append('line').attr('class', 'link-hit');
+    const allHits = hitEnter.merge(hitSel);
+    allHits
+      .on('mouseenter', (event, d) => {
+        const s = d.source.id || d.source;
+        const t = d.target.id || d.target;
+        const rel = lookupRelationship(s, t);
+        if (!rel) return;
+        const tip = document.getElementById('edge-tooltip');
+        tip.textContent = `${rel.from} → ${rel.to}: ${rel.description}`;
+        tip.classList.remove('hidden');
+        positionEdgeTooltip(event);
+      })
+      .on('mousemove', (event) => positionEdgeTooltip(event))
+      .on('mouseleave', () => {
+        document.getElementById('edge-tooltip').classList.add('hidden');
+      });
 
     // Node groups (halo + circle)
     const nodeSel = nodeLayer.selectAll('g.node').data(nodes, (d) => d.id);
@@ -269,14 +359,22 @@
         .force('clusterY', d3.forceY((d) => (clusterCenters[clusterMap[d.id]] || {}).y || r.height / 2).strength(0.06));
     }
 
+    renderSuperRings();
+
     simulation.on('tick', () => {
       allLinks
         .attr('x1', (d) => d.source.x)
         .attr('y1', (d) => d.source.y)
         .attr('x2', (d) => d.target.x)
         .attr('y2', (d) => d.target.y);
+      allHits
+        .attr('x1', (d) => d.source.x)
+        .attr('y1', (d) => d.source.y)
+        .attr('x2', (d) => d.target.x)
+        .attr('y2', (d) => d.target.y);
       allNodes.attr('transform', (d) => `translate(${d.x}, ${d.y})`);
       allLabels.attr('x', (d) => d.x).attr('y', (d) => d.y);
+      updateSuperRings();
     });
 
     allNodes.on('mouseover.label', (event, d) => {
@@ -288,6 +386,134 @@
     });
 
     updateHud();
+  }
+
+  function positionEdgeTooltip(event) {
+    const tip = document.getElementById('edge-tooltip');
+    const rect = graphContainer.getBoundingClientRect();
+    tip.style.left = (event.clientX - rect.left) + 'px';
+    tip.style.top = (event.clientY - rect.top) + 'px';
+  }
+
+  // --- Super-cluster rendering ---
+
+  function getSuperClusterArticles(name, visited = new Set()) {
+    if (visited.has(name)) return new Set();
+    visited.add(name);
+    const sc = superClusters.find((s) => s.name === name);
+    if (!sc) return new Set();
+    const out = new Set();
+    for (const child of sc.children) {
+      // Child could be a cluster name (articles via clusterMap) or a nested super-cluster.
+      if (superClusters.some((s) => s.name === child)) {
+        for (const a of getSuperClusterArticles(child, visited)) out.add(a);
+      } else if (clusterMap) {
+        for (const [title, cname] of Object.entries(clusterMap)) {
+          if (cname === child) out.add(title);
+        }
+      }
+    }
+    return out;
+  }
+
+  function superClusterDepth(name, memo = {}) {
+    if (memo[name] != null) return memo[name];
+    const sc = superClusters.find((s) => s.name === name);
+    if (!sc || !sc.parent) return (memo[name] = 0);
+    return (memo[name] = 1 + superClusterDepth(sc.parent, memo));
+  }
+
+  function renderSuperRings() {
+    if (colorMode !== 'cluster' || !superClusters.length) {
+      superLayer.selectAll('g.super-group').remove();
+      return;
+    }
+    // Build a render list sorted by depth (shallow first → deep on top).
+    const depthMemo = {};
+    const sorted = superClusters
+      .map((s) => ({ ...s, _depth: superClusterDepth(s.name, depthMemo) }))
+      .sort((a, b) => a._depth - b._depth);
+
+    const groupSel = superLayer.selectAll('g.super-group').data(sorted, (d) => d.name);
+    groupSel.exit().remove();
+    const groupEnter = groupSel.enter().append('g').attr('class', 'super-group');
+    groupEnter.append('circle').attr('class', 'super-ring');
+    groupEnter.append('text').attr('class', 'super-ring-label').attr('text-anchor', 'middle');
+  }
+
+  function updateSuperRings() {
+    if (colorMode !== 'cluster' || !superClusters.length) {
+      superLayer.selectAll('g.super-group').remove();
+      return;
+    }
+    const ringColors = ['#a78bfa', '#f472b6', '#5eead4', '#fbbf24', '#60a5fa', '#c084fc'];
+    const byId = new Map(nodes.map((n) => [n.id, n]));
+    const padByDepth = [36, 24, 16, 10];
+
+    superLayer.selectAll('g.super-group').each(function (d) {
+      const memberIds = getSuperClusterArticles(d.name);
+      const pts = [];
+      for (const id of memberIds) {
+        const n = byId.get(id);
+        if (n && typeof n.x === 'number') pts.push(n);
+      }
+      const g = d3.select(this);
+      if (pts.length < 2) {
+        g.style('display', 'none');
+        return;
+      }
+      g.style('display', null);
+      const cx = d3.mean(pts, (p) => p.x);
+      const cy = d3.mean(pts, (p) => p.y);
+      let maxR = 0;
+      for (const p of pts) {
+        const dx = p.x - cx, dy = p.y - cy;
+        const r = Math.sqrt(dx * dx + dy * dy) + radiusFor(p);
+        if (r > maxR) maxR = r;
+      }
+      const depth = d._depth || 0;
+      const pad = padByDepth[Math.min(depth, padByDepth.length - 1)];
+      const R = maxR + pad;
+      const color = ringColors[depth % ringColors.length];
+      g.select('circle.super-ring')
+        .attr('cx', cx).attr('cy', cy).attr('r', R)
+        .attr('stroke', color)
+        .attr('stroke-width', 1.5 + depth * 0.2);
+      g.select('text.super-ring-label')
+        .attr('x', cx).attr('y', cy - R - 6)
+        .attr('fill', color)
+        .text(d.name);
+    });
+  }
+
+  function applyClusterState(state, activate) {
+    clusterMap = state.clusterMap || {};
+    superClusters = Array.isArray(state.superClusters) ? state.superClusters : [];
+    relationshipMap = new Map();
+    for (const r of (state.relationships || [])) {
+      if (r && r.from && r.to && r.description) {
+        relationshipMap.set(relKey(r.from, r.to), r.description);
+      }
+    }
+    computeAiEdgesFromRelationships();
+
+    const names = Array.from(new Set(Object.values(clusterMap)));
+    const richPalette = [
+      '#a78bfa', '#f472b6', '#5eead4', '#fbbf24', '#60a5fa',
+      '#f87171', '#c084fc', '#34d399', '#fb923c', '#818cf8',
+      '#e879f9', '#22d3ee', '#fde047', '#4ade80'
+    ];
+    clusterColors = d3.scaleOrdinal(richPalette).domain(names);
+
+    if (activate) {
+      colorMode = 'cluster';
+      const btn = document.getElementById('btn-cluster');
+      if (btn) btn.classList.add('active');
+      renderLegend(names);
+    }
+    recomputeLinks();
+    renderSuperRings();
+    render();
   }
 
   function computeClusterCenters(width, height) {
@@ -335,6 +561,7 @@
   }
 
   function openInfo(d) {
+    selectedId = d.id;
     infoPanel.classList.remove('hidden');
     document.getElementById('info-title').textContent = d.title;
     document.getElementById('info-summary').textContent = d.summary || '(No summary captured.)';
@@ -484,9 +711,6 @@
     });
   });
 
-  const VIEW_CYCLE = { graph: 'list', list: 'tree', tree: 'graph' };
-  const VIEW_NEXT_LABEL = { graph: 'List', list: 'Tree', tree: 'Graph' };
-
   function switchView(mode) {
     currentView = mode;
     document.getElementById('graph-container').classList.toggle('hidden', mode !== 'graph');
@@ -496,15 +720,14 @@
     nodeLayer.selectAll('g.node').classed('selected', false);
     selectedId = null;
 
-    const btn = document.getElementById('btn-toggle-view');
-    btn.querySelector('span').textContent = VIEW_NEXT_LABEL[mode];
-    btn.classList.toggle('active', mode !== 'graph');
+    const sel = document.getElementById('view-select');
+    if (sel && sel.value !== mode) sel.value = mode;
 
     if (mode === 'tree') renderTreeView();
   }
 
-  document.getElementById('btn-toggle-view').addEventListener('click', () => {
-    switchView(VIEW_CYCLE[currentView]);
+  document.getElementById('view-select').addEventListener('change', (e) => {
+    switchView(e.target.value);
   });
 
   // --- Tree view ---
@@ -718,6 +941,27 @@
     selectedId = null;
   });
 
+  document.getElementById('btn-view-tree').addEventListener('click', () => {
+    if (!selectedId || !articles[selectedId]) return;
+    const target = selectedId;
+    // Pre-set the select so populateRootSelect's "preserve previous" path keeps our target.
+    const rootSel = document.getElementById('tree-root-select');
+    if (rootSel) {
+      if (!Array.from(rootSel.options).some((o) => o.value === target)) {
+        const opt = document.createElement('option');
+        opt.value = target;
+        opt.textContent = target;
+        rootSel.appendChild(opt);
+      }
+      rootSel.value = target;
+    }
+    treeRootTitle = target;
+    switchView('tree');
+    if (rootSel) rootSel.value = target;
+    treeRootTitle = target;
+    drawTree();
+  });
+
   document.getElementById('btn-dismiss-warning').addEventListener('click', () => largeWarning.classList.add('hidden'));
   document.getElementById('btn-filter-30').addEventListener('click', () => {
     const now = new Date();
@@ -741,55 +985,158 @@
 
   // --- Cluster mode ---
 
-  document.getElementById('btn-cluster').addEventListener('click', async () => {
+  async function runClustering({ forceFresh = false } = {}) {
     const btn = document.getElementById('btn-cluster');
     const label = btn.querySelector('span');
-    if (colorMode === 'cluster') {
-      colorMode = 'category';
-      clusterMap = null;
-      btn.classList.remove('active');
-      legendEl.classList.add('hidden');
-      render();
-      return;
-    }
     const settings = await getSettings();
     if (!settings.apiKey) { toast('Set your Gemini API key in Settings first.', 'error'); return; }
     const list = Object.values(articles);
     if (list.length === 0) return;
     btn.disabled = true;
     label.textContent = 'Clustering…';
+
+    const priorForCall = (!forceFresh && priorClusterState && priorClusterState.clusterMap) ? {
+      clusters: Array.from(
+        new Map(Array.from(new Set(Object.values(priorClusterState.clusterMap))).map((name) => [name, {
+          clusterName: name,
+          articles: Object.entries(priorClusterState.clusterMap)
+            .filter(([, c]) => c === name).map(([t]) => t)
+        }])).values()
+      ),
+      superClusters: priorClusterState.superClusters || [],
+      relationships: priorClusterState.relationships || [],
+      clusteredTitles: priorClusterState.clusteredTitles || Object.keys(priorClusterState.clusterMap)
+    } : null;
+
     try {
-      const clusters = await clusterArticles(list, settings.apiKey);
-      clusterMap = {};
-      for (const c of clusters) {
-        for (const t of c.articles) clusterMap[t] = c.clusterName;
+      const result = await clusterArticles(list, settings.apiKey, priorForCall ? { prior: priorForCall } : {});
+      const clustersArr = Array.isArray(result.clusters) ? result.clusters : [];
+      const relationships = Array.isArray(result.relationships) ? result.relationships : [];
+      const superClustersArr = Array.isArray(result.superClusters) ? result.superClusters : [];
+
+      // Build cluster map from LLM output; preserve prior assignment for untouched titles.
+      const newMap = {};
+      for (const c of clustersArr) {
+        for (const t of c.articles) newMap[t] = c.clusterName;
       }
-      for (const a of list) if (!clusterMap[a.title]) clusterMap[a.title] = 'Unclustered';
-      const names = Array.from(new Set(Object.values(clusterMap)));
-      const richPalette = [
-        '#a78bfa', '#f472b6', '#5eead4', '#fbbf24', '#60a5fa',
-        '#f87171', '#c084fc', '#34d399', '#fb923c', '#818cf8',
-        '#e879f9', '#22d3ee', '#fde047', '#4ade80'
-      ];
-      clusterColors = d3.scaleOrdinal(richPalette).domain(names);
-      colorMode = 'cluster';
-      btn.classList.add('active');
-      renderLegend(names);
-      render();
-      toast(`Found ${names.length} clusters`, 'success');
+      if (priorForCall) {
+        for (const [t, c] of Object.entries(priorClusterState.clusterMap || {})) {
+          if (!newMap[t] && articles[t]) newMap[t] = c;
+        }
+      }
+      for (const a of list) if (!newMap[a.title]) newMap[a.title] = 'Unclustered';
+
+      // Relationships: union prior + new (drop any endpoint no longer in library).
+      const presentTitles = new Set(Object.keys(articles));
+      const relMap = new Map();
+      if (priorForCall) {
+        for (const r of (priorClusterState.relationships || [])) {
+          if (r && r.from && r.to && presentTitles.has(r.from) && presentTitles.has(r.to)) {
+            relMap.set(relKey(r.from, r.to), r);
+          }
+        }
+      }
+      for (const r of relationships) {
+        if (r && r.from && r.to && presentTitles.has(r.from) && presentTitles.has(r.to)) {
+          relMap.set(relKey(r.from, r.to), r);
+        }
+      }
+
+      // Super-clusters: replace returned ones by name, preserve untouched prior ones.
+      const returnedNames = new Set(superClustersArr.map((s) => s.name));
+      const mergedSupers = superClustersArr.slice();
+      if (priorForCall) {
+        for (const s of (priorClusterState.superClusters || [])) {
+          if (!returnedNames.has(s.name)) mergedSupers.push(s);
+        }
+      }
+
+      const snapshot = {
+        clusterMap: newMap,
+        superClusters: mergedSupers,
+        relationships: Array.from(relMap.values()),
+        clusteredTitles: Object.keys(articles),
+        updatedAt: Date.now()
+      };
+      priorClusterState = snapshot;
+      await setClusterState(snapshot);
+      applyClusterState(snapshot, /*activate=*/true);
+
+      const clusterCount = new Set(Object.values(newMap)).size;
+      toast(`Clustered into ${clusterCount} group${clusterCount === 1 ? '' : 's'}${mergedSupers.length ? ' · ' + mergedSupers.length + ' super-cluster' + (mergedSupers.length === 1 ? '' : 's') : ''}`, 'success');
     } catch (err) {
       toast('Clustering failed: ' + err.message, 'error');
     } finally {
       btn.disabled = false;
       label.textContent = 'Cluster';
     }
+  }
+
+  document.getElementById('btn-cluster').addEventListener('click', async (event) => {
+    const btn = document.getElementById('btn-cluster');
+    // Toggle off if currently active.
+    if (colorMode === 'cluster') {
+      colorMode = 'category';
+      aiEdges = [];
+      btn.classList.remove('active');
+      legendEl.classList.add('hidden');
+      recomputeLinks();
+      render();
+      return;
+    }
+    // If a snapshot exists and there are no new articles since last cluster, just activate.
+    if (priorClusterState && priorClusterState.clusterMap && !event.shiftKey) {
+      const clustered = new Set(priorClusterState.clusteredTitles || Object.keys(priorClusterState.clusterMap));
+      const hasNew = Object.keys(articles).some((t) => !clustered.has(t));
+      if (!hasNew) {
+        applyClusterState(priorClusterState, /*activate=*/true);
+        return;
+      }
+    }
+    await runClustering({ forceFresh: event.shiftKey });
+  });
+
+  document.getElementById('btn-cluster-rebuild').addEventListener('click', async () => {
+    priorClusterState = null;
+    await setClusterState(null);
+    await runClustering({ forceFresh: true });
   });
 
   function renderLegend(names) {
-    legendEl.innerHTML = '<h3>Clusters</h3>' + names.map((n) => {
+    const clusterItem = (n) => {
       const color = clusterColors(n);
       return `<div class="legend-item" style="color:${color}"><span class="legend-swatch" style="background:${color}"></span><span style="color:var(--fg)">${escapeHtml(n)}</span></div>`;
-    }).join('');
+    };
+
+    let html = '<h3>Clusters</h3>';
+    if (superClusters && superClusters.length) {
+      const roots = superClusters.filter((s) => !s.parent);
+      const assigned = new Set();
+
+      const walkSuper = (s, depth) => {
+        let out = `<div class="legend-group-title" style="margin-left:${depth * 10}px">${escapeHtml(s.name)}</div>`;
+        for (const child of s.children) {
+          const nestedSuper = superClusters.find((x) => x.name === child);
+          if (nestedSuper) {
+            out += walkSuper(nestedSuper, depth + 1);
+          } else if (names.includes(child)) {
+            assigned.add(child);
+            out += `<div class="legend-indent" style="margin-left:${(depth + 1) * 10}px">${clusterItem(child)}</div>`;
+          }
+        }
+        return out;
+      };
+
+      for (const r of roots) html += walkSuper(r, 0);
+      const unassigned = names.filter((n) => !assigned.has(n));
+      if (unassigned.length) {
+        html += `<div class="legend-group-title">Other</div>`;
+        html += unassigned.map(clusterItem).join('');
+      }
+    } else {
+      html += names.map(clusterItem).join('');
+    }
+    legendEl.innerHTML = html;
     legendEl.classList.remove('hidden');
   }
 
