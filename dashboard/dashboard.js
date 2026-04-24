@@ -40,7 +40,6 @@
   let navChildrenMap = {}; // title → [child titles] from recorded navigation
   const treeInsightsCache = new Map(); // treeRootTitle → {recs, gaps, tutorItems, hasTutor}
   let degreeMap = {};          // id → connection count
-  let relationshipMap = new Map();  // "from\x01to" → description
   let superClusters = [];      // [{name, children, parent}]
   let priorClusterState = null; // persisted snapshot for incremental clustering
 
@@ -60,7 +59,6 @@
   const rootG = svg.append('g').attr('class', 'root');
   const superLayer = rootG.append('g').attr('class', 'super-clusters');
   const linkLayer = rootG.append('g').attr('class', 'links');
-  const linkHitLayer = rootG.append('g').attr('class', 'link-hits');
   const nodeLayer = rootG.append('g').attr('class', 'nodes');
   const labelLayer = rootG.append('g').attr('class', 'labels');
 
@@ -220,31 +218,29 @@
     }
   }
 
-  function relKey(a, b) { return a + '\u0001' + b; }
-
-  function lookupRelationship(a, b) {
-    const ab = relationshipMap.get(relKey(a, b));
-    if (ab) return { description: ab, from: a, to: b };
-    const ba = relationshipMap.get(relKey(b, a));
-    if (ba) return { description: ba, from: b, to: a };
-    return null;
-  }
-
-  function computeAiEdgesFromRelationships() {
+  function computeAiEdgesFromConnections(connections) {
     const present = new Set(Object.keys(articles));
     const seen = new Set();
     aiEdges = [];
-    for (const [key] of relationshipMap) {
-      const sep = key.indexOf('\u0001');
-      if (sep === -1) continue;
-      const from = key.slice(0, sep);
-      const to = key.slice(sep + 1);
-      if (!present.has(from) || !present.has(to) || from === to) continue;
-      const canon = [from, to].sort().join('\u0001');
-      if (seen.has(canon)) continue;
-      seen.add(canon);
-      aiEdges.push({ source: from, target: to, aiOnly: true });
+    for (const conn of (connections || [])) {
+      const from = conn.title;
+      if (!from || !present.has(from)) continue;
+      for (const to of (conn.connectedTo || [])) {
+        if (!to || to === from || !present.has(to)) continue;
+        const canon = [from, to].sort().join('\u0001');
+        if (seen.has(canon)) continue;
+        seen.add(canon);
+        aiEdges.push({ source: from, target: to, aiOnly: true });
+      }
     }
+  }
+
+  function updateNodeColors() {
+    nodeLayer.selectAll('g.node').each(function(d) {
+      const color = colorFor(d);
+      d3.select(this).select('circle.node-core').attr('fill', color);
+      d3.select(this).style('color', color).attr('color', color);
+    });
   }
 
   function colorFor(n) {
@@ -279,27 +275,6 @@
     const linkEnter = linkSel.enter().append('line').attr('class', 'link').attr('stroke-width', 1);
     const allLinks = linkEnter.merge(linkSel);
     allLinks.classed('ai-only', (d) => !!d.aiOnly);
-
-    // Invisible wider hit targets for edge hover tooltips.
-    const hitSel = linkHitLayer.selectAll('line').data(links, linkKey);
-    hitSel.exit().remove();
-    const hitEnter = hitSel.enter().append('line').attr('class', 'link-hit');
-    const allHits = hitEnter.merge(hitSel);
-    allHits
-      .on('mouseenter', (event, d) => {
-        const s = d.source.id || d.source;
-        const t = d.target.id || d.target;
-        const rel = lookupRelationship(s, t);
-        if (!rel) return;
-        const tip = document.getElementById('edge-tooltip');
-        tip.textContent = `${rel.from} → ${rel.to}: ${rel.description}`;
-        tip.classList.remove('hidden');
-        positionEdgeTooltip(event);
-      })
-      .on('mousemove', (event) => positionEdgeTooltip(event))
-      .on('mouseleave', () => {
-        document.getElementById('edge-tooltip').classList.add('hidden');
-      });
 
     // Node groups (halo + circle)
     const nodeSel = nodeLayer.selectAll('g.node').data(nodes, (d) => d.id);
@@ -367,11 +342,6 @@
         .attr('y1', (d) => d.source.y)
         .attr('x2', (d) => d.target.x)
         .attr('y2', (d) => d.target.y);
-      allHits
-        .attr('x1', (d) => d.source.x)
-        .attr('y1', (d) => d.source.y)
-        .attr('x2', (d) => d.target.x)
-        .attr('y2', (d) => d.target.y);
       allNodes.attr('transform', (d) => `translate(${d.x}, ${d.y})`);
       allLabels.attr('x', (d) => d.x).attr('y', (d) => d.y);
       updateSuperRings();
@@ -386,13 +356,6 @@
     });
 
     updateHud();
-  }
-
-  function positionEdgeTooltip(event) {
-    const tip = document.getElementById('edge-tooltip');
-    const rect = graphContainer.getBoundingClientRect();
-    tip.style.left = (event.clientX - rect.left) + 'px';
-    tip.style.top = (event.clientY - rect.top) + 'px';
   }
 
   // --- Super-cluster rendering ---
@@ -489,13 +452,7 @@
   function applyClusterState(state, activate) {
     clusterMap = state.clusterMap || {};
     superClusters = Array.isArray(state.superClusters) ? state.superClusters : [];
-    relationshipMap = new Map();
-    for (const r of (state.relationships || [])) {
-      if (r && r.from && r.to && r.description) {
-        relationshipMap.set(relKey(r.from, r.to), r.description);
-      }
-    }
-    computeAiEdgesFromRelationships();
+    computeAiEdgesFromConnections(state.connections || []);
 
     const names = Array.from(new Set(Object.values(clusterMap)));
     const richPalette = [
@@ -514,6 +471,7 @@
     recomputeLinks();
     renderSuperRings();
     render();
+    if (activate) updateNodeColors();
   }
 
   function computeClusterCenters(width, height) {
@@ -1004,14 +962,14 @@
         }])).values()
       ),
       superClusters: priorClusterState.superClusters || [],
-      relationships: priorClusterState.relationships || [],
+      connections: priorClusterState.connections || [],
       clusteredTitles: priorClusterState.clusteredTitles || Object.keys(priorClusterState.clusterMap)
     } : null;
 
     try {
       const result = await clusterArticles(list, settings.apiKey, priorForCall ? { prior: priorForCall } : {});
       const clustersArr = Array.isArray(result.clusters) ? result.clusters : [];
-      const relationships = Array.isArray(result.relationships) ? result.relationships : [];
+      const connectionsNew = Array.isArray(result.connections) ? result.connections : [];
       const superClustersArr = Array.isArray(result.superClusters) ? result.superClusters : [];
 
       // Build cluster map from LLM output; preserve prior assignment for untouched titles.
@@ -1026,21 +984,29 @@
       }
       for (const a of list) if (!newMap[a.title]) newMap[a.title] = 'Unclustered';
 
-      // Relationships: union prior + new (drop any endpoint no longer in library).
+      // Connections: union prior + new, drop endpoints no longer in library.
       const presentTitles = new Set(Object.keys(articles));
-      const relMap = new Map();
+      const connMap = new Map();
       if (priorForCall) {
-        for (const r of (priorClusterState.relationships || [])) {
-          if (r && r.from && r.to && presentTitles.has(r.from) && presentTitles.has(r.to)) {
-            relMap.set(relKey(r.from, r.to), r);
+        for (const c of (priorClusterState.connections || [])) {
+          if (c && c.title && presentTitles.has(c.title)) {
+            const set = connMap.get(c.title) || new Set();
+            for (const t of (c.connectedTo || [])) if (t && presentTitles.has(t)) set.add(t);
+            connMap.set(c.title, set);
           }
         }
       }
-      for (const r of relationships) {
-        if (r && r.from && r.to && presentTitles.has(r.from) && presentTitles.has(r.to)) {
-          relMap.set(relKey(r.from, r.to), r);
+      for (const c of connectionsNew) {
+        if (c && c.title && presentTitles.has(c.title)) {
+          const set = connMap.get(c.title) || new Set();
+          for (const t of (c.connectedTo || [])) if (t && presentTitles.has(t)) set.add(t);
+          connMap.set(c.title, set);
         }
       }
+      const connectionsArr = Array.from(connMap.entries()).map(([title, set]) => ({
+        title,
+        connectedTo: Array.from(set)
+      }));
 
       // Super-clusters: replace returned ones by name, preserve untouched prior ones.
       const returnedNames = new Set(superClustersArr.map((s) => s.name));
@@ -1054,7 +1020,7 @@
       const snapshot = {
         clusterMap: newMap,
         superClusters: mergedSupers,
-        relationships: Array.from(relMap.values()),
+        connections: connectionsArr,
         clusteredTitles: Object.keys(articles),
         updatedAt: Date.now()
       };
